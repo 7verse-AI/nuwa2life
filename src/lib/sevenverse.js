@@ -10,7 +10,7 @@ const SILENT_3S = 'https://p02-be-dev-1305923417.cos.na-siliconvalley.myqcloud.c
 const DEFAULT_SLLM = 'qwen2.5-72b-instruct'
 
 function getBase() {
-  return (getConfigValue('sevenverseBase') || 'https://uat.7verse.ai').replace(/\/+$/, '')
+  return (getConfigValue('sevenverseBase') || 'https://7verse.ai').replace(/\/+$/, '')
 }
 
 function getAuthCookie() {

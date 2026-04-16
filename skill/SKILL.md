@@ -207,4 +207,4 @@ nuwa2life create "{name}"
 
 ---
 
-*Fork of [alchaincyf/nuwa-skill](https://github.com/alchaincyf/nuwa-skill) · Powered by [7verse.ai](https://uat.7verse.ai)*
+*Fork of [alchaincyf/nuwa-skill](https://github.com/alchaincyf/nuwa-skill) · Powered by [7verse.ai](https://7verse.ai)*

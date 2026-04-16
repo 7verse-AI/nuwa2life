@@ -26,7 +26,7 @@ import https from 'https'
 import { getConfigValue, saveConfig, loadConfig } from './config.js'
 
 const SEVENVERSE_BASE = () =>
-  (getConfigValue('sevenverseBase') || 'https://uat.7verse.ai').replace(/\/+$/, '')
+  (getConfigValue('sevenverseBase') || 'https://7verse.ai').replace(/\/+$/, '')
 
 // ── Token storage ─────────────────────────────────────────────────────────────
 

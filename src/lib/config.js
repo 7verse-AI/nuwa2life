@@ -33,7 +33,7 @@ export function getConfigValue(key) {
   // Priority: env var > config file
   const envMap = {
     elevenlabsApiKey: 'ELEVENLABS_API_KEY',
-    sevenverseToken:  'SEVENVERSE_UAT_ACCESS_TOKEN',
+    sevenverseToken:  'SEVENVERSE_ACCESS_TOKEN',
     sevenverseBase:   'SEVENVERSE_BASE',
   }
   if (envMap[key] && process.env[envMap[key]]) return process.env[envMap[key]]

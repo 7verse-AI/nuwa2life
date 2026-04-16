@@ -270,7 +270,7 @@ export async function create(args) {
 
   // ── Open in browser ───────────────────────────────────────────────────────
   const liveUrl = contentResult?.contentId
-    ? `${(process.env.SEVENVERSE_BASE || 'https://uat.7verse.ai').replace(/\/+$/, '')}/content/${contentResult.contentId}/live?auto_start=1`
+    ? `${(process.env.SEVENVERSE_BASE || 'https://7verse.ai').replace(/\/+$/, '')}/content/${contentResult.contentId}/live?auto_start=1`
     : charResult.characterUrl
 
   if (liveUrl) {
