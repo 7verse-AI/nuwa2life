@@ -1,0 +1,37 @@
+{
+  "name": "nuwa2life",
+  "version": "0.1.0",
+  "description": "让任何人物拥有声音和面孔 — 从 CLI 一句话把历史人物、公众人物活体化到 7verse.ai",
+  "type": "module",
+  "bin": {
+    "nuwa2life": "./bin/nuwa2life.js"
+  },
+  "scripts": {
+    "dev": "node bin/nuwa2life.js",
+    "test:dry": "node bin/nuwa2life.js test --dry-run"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.9.1",
+    "open": "^10.1.0",
+    "picocolors": "^1.1.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "skill",
+    "ai",
+    "7verse",
+    "elevenlabs",
+    "voice-clone",
+    "nuwa"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YOUR_HANDLE/nuwa2life"
+  }
+}
