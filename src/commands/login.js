@@ -3,7 +3,7 @@
  */
 import * as p from '@clack/prompts'
 import pc from 'picocolors'
-import { isCachedTokenValid, oauthFlow, saveToken, verifyToken } from '../lib/oauth.js'
+import { isCachedTokenValid, oauthFlow, saveToken, verifyToken, getTokenCopyInstructions } from '../lib/oauth.js'
 
 export async function login() {
   console.log()
@@ -27,8 +27,7 @@ export async function login() {
     }
   }
 
-  p.log.info('将打开浏览器，用 Google 账号登录 7verse.ai')
-  p.log.info('登录成功后，按页面步骤从 DevTools 复制 Token，粘贴回这里')
+  p.log.info(`将打开 7verse.ai，用 Google 账号登录，登录后从 DevTools 复制 Token`)
 
   const go = await p.confirm({ message: '准备好？按 Y 打开浏览器', initialValue: true })
   if (p.isCancel(go) || !go) {
@@ -44,7 +43,9 @@ export async function login() {
 
     try {
       token = await oauthFlow(async () => {
-        p.log.info('浏览器已打开 → 完成 Google 登录 → 按页面步骤复制 access_token_uat')
+        console.log()
+        console.log(pc.dim('     ' + getTokenCopyInstructions()))
+        console.log()
 
         const raw = await p.text({
           message: '粘贴 access_token_uat 的值（输入 r 可重新打开浏览器）：',
