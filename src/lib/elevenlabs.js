@@ -67,6 +67,11 @@ export async function cloneVoice({ audioPath, voiceName, description = '' }) {
           if (res.statusCode === 422) reject(new Error(`音频无效 (422): ${msg}\n提示：音频需至少 30 秒，尽量干净无背景音乐`))
           else if (res.statusCode === 401) reject(new Error('ElevenLabs API Key 无效，请重新运行 nuwa2life setup'))
           else if (res.statusCode === 429) reject(new Error('ElevenLabs 配额已用完，请升级套餐或等待重置'))
+          else if (res.statusCode === 400 && String(msg).toLowerCase().includes('subscription')) {
+            const err = new Error('当前套餐不支持音色克隆，需升级到 Starter+ 计划')
+            err.code = 'SUBSCRIPTION_REQUIRED'
+            reject(err)
+          }
           else reject(new Error(`ElevenLabs 错误 ${res.statusCode}: ${msg}`))
           return
         }
@@ -80,6 +85,63 @@ export async function cloneVoice({ audioPath, voiceName, description = '' }) {
     req.write(body)
     req.end()
   })
+}
+
+/**
+ * Fetch premade voices and pick the best match for a voice description.
+ * Parses description for gender/age/accent hints, scores candidates by labels.
+ */
+export async function selectBestPremadeVoice(voiceDescription = '') {
+  const apiKey = getConfigValue('elevenlabsApiKey')
+  const voices = await new Promise((resolve, reject) => {
+    const req = https.request(
+      { hostname: API_BASE, path: '/v1/voices', method: 'GET',
+        headers: { 'xi-api-key': apiKey } },
+      (res) => {
+        let raw = ''
+        res.on('data', d => raw += d)
+        res.on('end', () => {
+          try { resolve(JSON.parse(raw).voices || []) } catch { resolve([]) }
+        })
+      }
+    )
+    req.on('error', reject)
+    req.setTimeout(15_000, () => { req.destroy(); reject(new Error('voices 列表请求超时')) })
+    req.end()
+  })
+
+  const desc = voiceDescription.toLowerCase()
+
+  // Detect gender
+  const wantsFemale = /\b(female|woman|girl|她|女)\b/.test(desc)
+  const wantsMale   = !wantsFemale || /\b(male|man|boy|他|男)\b/.test(desc)
+
+  // Detect age preference
+  const wantsOld    = /\b(old|elder|senior|mature|aged|年老|年长|老年)\b/.test(desc)
+  const wantsYoung  = /\b(young|youth|teen|年轻)\b/.test(desc)
+
+  // Accent preference
+  const wantsAmerican = /\b(american|midwest|nebraska|us|usa)\b/.test(desc)
+
+  function score(v) {
+    const labels = v.labels || {}
+    let s = 0
+    if (wantsMale   && labels.gender === 'male')     s += 3
+    if (wantsFemale && labels.gender === 'female')   s += 3
+    if (wantsOld    && labels.age === 'old')         s += 4
+    if (wantsOld    && labels.age === 'middle_aged') s += 1
+    if (wantsYoung  && labels.age === 'young')       s += 4
+    if (wantsAmerican && labels.accent === 'american') s += 2
+    if (labels.use_case === 'conversational')         s += 1
+    return s
+  }
+
+  const premade = voices.filter(v => v.category === 'premade')
+  if (!premade.length) throw new Error('未找到 premade 声音列表')
+
+  premade.sort((a, b) => score(b) - score(a))
+  const best = premade[0]
+  return { voiceId: best.voice_id, voiceName: best.name, vendor: 'elevenlabs', premade: true }
 }
 
 export async function verifyApiKey(apiKey) {

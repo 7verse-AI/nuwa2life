@@ -3,7 +3,7 @@
  */
 import * as p from '@clack/prompts'
 import pc from 'picocolors'
-import { isCachedTokenValid, oauthFlow, saveToken, verifyToken, getTokenCopyInstructions } from '../lib/oauth.js'
+import { isCachedTokenValid, oauthFlowAutomatic, oauthFlowManual, saveToken, verifyToken } from '../lib/oauth.js'
 
 export async function login() {
   console.log()
@@ -27,27 +27,30 @@ export async function login() {
     }
   }
 
-  p.log.info(`将打开 7verse.ai，用 Google 账号登录，登录后从 DevTools 复制 Token`)
-
-  const go = await p.confirm({ message: '准备好？按 Y 打开浏览器', initialValue: true })
+  const go = await p.confirm({ message: '准备好？按 Y 打开浏览器完成 Google 登录', initialValue: true })
   if (p.isCancel(go) || !go) {
     p.outro(`已退出。${pc.dim('运行 nuwa2life login 重试。')}`)
     return
   }
 
   let token = ''
-  let attempt = 0
 
-  while (!token) {
-    attempt++
+  // Try automatic mode (Mode A): local callback server captures token automatically
+  try {
+    const sp = p.spinner()
+    sp.start('浏览器已打开，等待登录完成...')
+    token = await oauthFlowAutomatic()
+    sp.stop(pc.green('✓ 登录成功'))
+  } catch (e) {
+    // Fall back to manual token paste (Mode B)
+    p.log.warn('自动登录不可用，请手动复制 Token')
+    p.log.info('  打开 DevTools (F12) → Application → Cookies → 复制 access_token_uat 的值')
 
-    try {
-      token = await oauthFlow(async () => {
-        console.log()
-        console.log(pc.dim('     ' + getTokenCopyInstructions()))
-        console.log()
-
-        const raw = await p.text({
+    let attempt = 0
+    while (!token) {
+      attempt++
+      const raw = await oauthFlowManual(async () => {
+        const val = await p.text({
           message: '粘贴 access_token_uat 的值（输入 r 可重新打开浏览器）：',
           placeholder: 'eyJ...',
           validate(v) {
@@ -57,36 +60,20 @@ export async function login() {
             if (clean.length < 20) return 'Token 太短，请确认是否完整复制'
           },
         })
-        if (p.isCancel(raw)) { p.cancel('已退出。'); process.exit(0) }
-        return raw.trim().replace(/^["']|["']$/g, '')
+        if (p.isCancel(val)) { p.cancel('已退出。'); process.exit(0) }
+        return val.trim().replace(/^["']|["']$/g, '')
       })
-    } catch (e) {
-      p.log.error(`出错: ${e.message}`)
-    }
 
-    if (token?.toLowerCase() === 'r') {
-      token = ''
-      p.log.info('重新打开浏览器...')
-      continue
-    }
+      if (raw?.toLowerCase() === 'r') { p.log.info('重新打开浏览器...'); continue }
+      if (raw) { token = raw; break }
 
-    if (token) {
-      const sv = p.spinner()
-      sv.start('验证 Token...')
-      const tokenValid = await verifyToken(token)
-      sv.stop(tokenValid
-        ? pc.green('✓ 登录成功')
-        : pc.yellow('Token 验证失败（已保存，可能仍然有效）'))
-      saveToken(token)
-      break
-    }
-
-    if (attempt >= 3) {
-      const skip = await p.confirm({
-        message: '多次尝试失败，跳过？（运行 nuwa2life login 可随时重试）',
-        initialValue: true,
-      })
-      if (p.isCancel(skip) || skip) break
+      if (attempt >= 3) {
+        const skip = await p.confirm({
+          message: '多次尝试失败，跳过？（运行 nuwa2life login 可随时重试）',
+          initialValue: true,
+        })
+        if (p.isCancel(skip) || skip) break
+      }
     }
   }
 
@@ -94,6 +81,14 @@ export async function login() {
     p.outro(pc.yellow(`登录未完成。运行 ${pc.cyan('nuwa2life login')} 重试。`))
     return
   }
+
+  const sv = p.spinner()
+  sv.start('验证 Token...')
+  const tokenValid = await verifyToken(token)
+  sv.stop(tokenValid
+    ? pc.green('✓ Token 验证通过')
+    : pc.yellow('Token 验证失败（已保存，可能仍然有效）'))
+  saveToken(token)
 
   p.outro(pc.green('✓ 登录状态已更新'))
   console.log()

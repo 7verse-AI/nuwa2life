@@ -14,7 +14,7 @@ import { mkdirSync, cpSync, existsSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { saveConfig, markSetupComplete, loadConfig } from '../lib/config.js'
 import { verifyApiKey } from '../lib/elevenlabs.js'
-import { isCachedTokenValid, oauthFlow, saveToken, verifyToken, getTokenCopyInstructions } from '../lib/oauth.js'
+import { isCachedTokenValid, oauthFlowAutomatic, oauthFlowManual, saveToken, verifyToken } from '../lib/oauth.js'
 
 const SKILL_SRC = join(fileURLToPath(import.meta.url), '../../../skill')
 const SKILL_DST = join(homedir(), '.claude', 'skills', 'nuwa2life')
@@ -158,13 +158,42 @@ export async function setup() {
 
 // ── OAuth flow with retry ─────────────────────────────────────────────────────
 async function doLoginFlow() {
-  p.log.info(`将打开 7verse.ai，用 Google 账号登录，登录后从 DevTools 复制 Token`)
-
-  const go = await p.confirm({ message: '准备好？按 Y 打开浏览器', initialValue: true })
+  const go = await p.confirm({ message: '准备好？按 Y 打开浏览器完成 Google 登录', initialValue: true })
   if (p.isCancel(go) || !go) {
     p.log.warn(`跳过登录。稍后运行 ${pc.cyan('nuwa2life login')} 补上。`)
     return
   }
+
+  let token = ''
+
+  // Try automatic mode (Mode A): open browser, capture token via local callback server
+  try {
+    const s = p.spinner()
+    s.start('浏览器已打开，等待登录完成...')
+    token = await oauthFlowAutomatic()
+    s.stop(pc.green('✓ 登录成功'))
+  } catch (e) {
+    // Mode A failed (backend doesn't allowlist 127.0.0.1 yet, or timed out)
+    // Fall back to manual token paste (Mode B)
+    p.log.warn('自动登录不可用，请手动复制 Token')
+    token = await manualTokenFlow()
+  }
+
+  if (token) {
+    const s = p.spinner()
+    s.start('验证 Token...')
+    const valid = await verifyToken(token)
+    s.stop(valid ? pc.green('✓ 登录验证通过') : pc.yellow('Token 验证失败（已保存，可能仍然有效）'))
+    saveToken(token)
+  } else {
+    p.log.warn(`登录未完成。稍后运行 ${pc.cyan('nuwa2life login')} 重试。`)
+  }
+}
+
+// Manual token paste fallback (Mode B)
+async function manualTokenFlow() {
+  p.log.info('浏览器已打开 7verse.ai → 完成 Google 登录后：')
+  p.log.info('  打开 DevTools (F12) → Application → Cookies → 复制 access_token_uat 的值')
 
   let token = ''
   let attempt = 0
@@ -172,43 +201,27 @@ async function doLoginFlow() {
   while (!token) {
     attempt++
 
-    try {
-      token = await oauthFlow(async () => {
-        console.log()
-        console.log(pc.dim('     ' + getTokenCopyInstructions()))
-        console.log()
-
-        const raw = await p.text({
-          message: '粘贴 access_token_uat 的值（输入 r 可重新打开浏览器）：',
-          placeholder: 'eyJ...',
-          validate(v) {
-            if (!v?.trim()) return '请粘贴 Token 值'
-            const clean = v.trim().replace(/^["']|["']$/g, '')
-            if (clean.toLowerCase() === 'r') return undefined
-            if (clean.length < 20) return 'Token 太短，请确认是否完整复制'
-          },
-        })
-        if (p.isCancel(raw)) { p.cancel('已退出。'); process.exit(0) }
-        return raw.trim().replace(/^["']|["']$/g, '')
+    const raw = await oauthFlowManual(async () => {
+      const val = await p.text({
+        message: '粘贴 access_token_uat 的值（输入 r 可重新打开浏览器）：',
+        placeholder: 'eyJ...',
+        validate(v) {
+          if (!v?.trim()) return '请粘贴 Token 值'
+          const clean = v.trim().replace(/^["']|["']$/g, '')
+          if (clean.toLowerCase() === 'r') return undefined
+          if (clean.length < 20) return 'Token 太短，请确认是否完整复制'
+        },
       })
-    } catch (e) {
-      p.log.error(`出错: ${e.message}`)
-    }
+      if (p.isCancel(val)) { p.cancel('已退出。'); process.exit(0) }
+      return val.trim().replace(/^["']|["']$/g, '')
+    })
 
-    if (token?.toLowerCase() === 'r') {
-      token = ''
+    if (raw?.toLowerCase() === 'r') {
       p.log.info('重新打开浏览器...')
       continue
     }
 
-    if (token) {
-      const s = p.spinner()
-      s.start('验证 Token...')
-      const valid = await verifyToken(token)
-      s.stop(valid ? pc.green('✓ 登录成功') : pc.yellow('Token 验证失败（已保存，可能仍然有效）'))
-      saveToken(token)
-      break
-    }
+    if (raw) { token = raw; break }
 
     if (attempt >= 3) {
       const skip = await p.confirm({
@@ -219,7 +232,5 @@ async function doLoginFlow() {
     }
   }
 
-  if (!token) {
-    p.log.warn(`登录未完成。稍后运行 ${pc.cyan('nuwa2life login')} 重试。`)
-  }
+  return token
 }

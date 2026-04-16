@@ -10,10 +10,13 @@ import pc from 'picocolors'
 import { readFileSync, writeFileSync, existsSync, copyFileSync } from 'fs'
 import { join, extname, resolve as resolvePath } from 'path'
 import { getCacheDir, getConfigValue } from '../lib/config.js'
-import { validateAudioFile, cloneVoice } from '../lib/elevenlabs.js'
-import { uploadFile, upsertCharacter } from '../lib/sevenverse.js'
+import { validateAudioFile, cloneVoice, selectBestPremadeVoice } from '../lib/elevenlabs.js'
+import { uploadFile, upsertCharacter, registerContent } from '../lib/sevenverse.js'
 import { isCachedTokenValid } from '../lib/oauth.js'
 import { default as open } from 'open'
+
+// Non-TTY: running inside Claude Code or a pipe — skip interactive prompts
+const isTTY = Boolean(process.stdin.isTTY && process.stdout.isTTY)
 
 export async function create(args) {
   const name = args.join(' ').trim()
@@ -73,29 +76,41 @@ export async function create(args) {
     process.exit(1)
   }
 
-  // ── Audio input ───────────────────────────────────────────────────────────
+  // ── Audio / Voice ─────────────────────────────────────────────────────────
   p.log.step(pc.bold(`音频  —  ${charName} 的声音样本`))
-  p.log.info('把 mp3/wav/m4a 文件拖拽到终端，路径会自动填入')
-  p.log.info('建议 30 秒以上、无背景音乐、< 10MB')
 
-  // Check if voice already cloned
   const voiceJsonPath = join(cacheDir, 'voice.json')
   let voiceId
 
+  // Fast path: voice.json already exists — reuse without prompting in non-TTY
   if (existsSync(voiceJsonPath)) {
     const v = JSON.parse(readFileSync(voiceJsonPath, 'utf8'))
     if (v.voiceId) {
-      const reuse = await p.confirm({
-        message: `检测到已克隆的音色 (${v.voiceId})，直接使用？`,
-        initialValue: true,
-      })
-      if (!p.isCancel(reuse) && reuse) voiceId = v.voiceId
+      if (isTTY) {
+        const reuse = await p.confirm({
+          message: `检测到已有音色 (${v.voiceName || v.voiceId})，直接使用？`,
+          initialValue: true,
+        })
+        if (!p.isCancel(reuse) && reuse) voiceId = v.voiceId
+      } else {
+        voiceId = v.voiceId
+        p.log.success(`复用已有音色: ${v.voiceName || v.voiceId}`)
+      }
     }
   }
 
   if (!voiceId) {
-    let audioPath
-    while (true) {
+    // Find cached audio file
+    let cachedAudio = null
+    for (const ext of ['.mp3', '.wav', '.m4a', '.flac', '.ogg']) {
+      const candidate = join(cacheDir, `voice${ext}`)
+      if (existsSync(candidate)) { cachedAudio = candidate; break }
+    }
+
+    // In TTY mode: prompt for audio path if not cached
+    if (!cachedAudio && isTTY) {
+      p.log.info('把 mp3/wav/m4a 文件拖拽到终端，路径会自动填入')
+      p.log.info('建议 30 秒以上、无背景音乐、< 10MB')
       const raw = await p.text({
         message: '粘贴音频文件路径（或直接拖拽文件到终端）：',
         validate(v) {
@@ -106,30 +121,62 @@ export async function create(args) {
         },
       })
       if (p.isCancel(raw)) { p.cancel('已取消'); process.exit(0) }
-      audioPath = cleanPath(raw.trim())
-      break
+      const srcPath = cleanPath(raw.trim())
+      const audioExt = extname(srcPath).toLowerCase()
+      cachedAudio = join(cacheDir, `voice${audioExt}`)
+      copyFileSync(srcPath, cachedAudio)
     }
 
-    // Copy audio to cache
-    const audioExt = extname(audioPath).toLowerCase()
-    const cachedAudio = join(cacheDir, `voice${audioExt}`)
-    copyFileSync(audioPath, cachedAudio)
-
-    const s = p.spinner()
-    s.start(`克隆 ${charName} 的音色...`)
-    try {
-      const result = await cloneVoice({
-        audioPath: cachedAudio,
-        voiceName: charName,
-        description: distill.voice_description || '',
-      })
-      voiceId = result.voiceId
-      writeFileSync(voiceJsonPath, JSON.stringify(result, null, 2))
-      s.stop(pc.green(`✓ 音色克隆成功  voice_id: ${voiceId}`))
-    } catch (e) {
-      s.stop(pc.red('✗ 音色克隆失败'))
-      p.log.error(e.message)
-      process.exit(1)
+    if (cachedAudio) {
+      // Try voice cloning; fall back to premade on subscription error
+      const s = p.spinner()
+      s.start(`克隆 ${charName} 的音色...`)
+      try {
+        const result = await cloneVoice({
+          audioPath: cachedAudio,
+          voiceName: charName,
+          description: distill.voice_description || '',
+        })
+        voiceId = result.voiceId
+        writeFileSync(voiceJsonPath, JSON.stringify(result, null, 2))
+        s.stop(pc.green(`✓ 音色克隆成功  voice_id: ${voiceId}`))
+      } catch (e) {
+        if (e.code === 'SUBSCRIPTION_REQUIRED') {
+          s.stop(pc.yellow(`⚠ ${e.message}`))
+          p.log.info('自动切换到最匹配的 premade 声音...')
+          const sp = p.spinner()
+          sp.start('从 ElevenLabs 挑选最适合的内置声音...')
+          try {
+            const result = await selectBestPremadeVoice(distill.voice_description || '')
+            voiceId = result.voiceId
+            writeFileSync(voiceJsonPath, JSON.stringify(result, null, 2))
+            sp.stop(pc.green(`✓ 已选用内置声音: ${result.voiceName}`))
+          } catch (e2) {
+            sp.stop(pc.red('✗ 获取声音列表失败'))
+            p.log.error(e2.message)
+            process.exit(1)
+          }
+        } else {
+          s.stop(pc.red('✗ 音色克隆失败'))
+          p.log.error(e.message)
+          process.exit(1)
+        }
+      }
+    } else {
+      // Non-TTY, no cached audio — pick best premade voice automatically
+      p.log.warn('未找到音频样本，自动选用最匹配的内置声音')
+      const s = p.spinner()
+      s.start('从 ElevenLabs 挑选最适合的内置声音...')
+      try {
+        const result = await selectBestPremadeVoice(distill.voice_description || '')
+        voiceId = result.voiceId
+        writeFileSync(voiceJsonPath, JSON.stringify(result, null, 2))
+        s.stop(pc.green(`✓ 已选用内置声音: ${result.voiceName}`))
+      } catch (e) {
+        s.stop(pc.red('✗ 获取声音列表失败'))
+        p.log.error(e.message)
+        process.exit(1)
+      }
     }
   }
 
@@ -142,11 +189,16 @@ export async function create(args) {
   if (existsSync(portraitCosPath)) {
     const pc2 = JSON.parse(readFileSync(portraitCosPath, 'utf8'))
     if (pc2.url) {
-      const reuse = await p.confirm({
-        message: `检测到已上传的首帧图，直接使用？`,
-        initialValue: true,
-      })
-      if (!p.isCancel(reuse) && reuse) portraitUrl = pc2.url
+      if (isTTY) {
+        const reuse = await p.confirm({
+          message: `检测到已上传的首帧图，直接使用？`,
+          initialValue: true,
+        })
+        if (!p.isCancel(reuse) && reuse) portraitUrl = pc2.url
+      } else {
+        portraitUrl = pc2.url
+        p.log.success(`复用已上传首帧图`)
+      }
     }
   }
 
@@ -190,22 +242,48 @@ export async function create(args) {
   try {
     charResult = await upsertCharacter({ distill, voiceId, portraitUrl })
     writeFileSync(join(cacheDir, 'upsert_response.json'), JSON.stringify(charResult, null, 2))
-    s.stop(pc.green(`✓ 角色注册成功`))
+    s.stop(pc.green(`✓ 角色注册成功  character_id: ${charResult.characterId}`))
   } catch (e) {
     s.stop(pc.red('✗ 注册失败'))
     p.log.error(e.message)
     process.exit(1)
   }
 
+  // ── Register Content ──────────────────────────────────────────────────────
+  p.log.step(pc.bold('发布内容'))
+
+  const sc = p.spinner()
+  sc.start('创建 Content 记录（开播所需）...')
+  let contentResult
+  try {
+    contentResult = await registerContent({
+      characterId: charResult.characterId,
+      name: distill.name || charName,
+      description: distill.persona ? distill.persona.slice(0, 200) : charName,
+      portraitUrl,
+    })
+    writeFileSync(join(cacheDir, 'content_response.json'), JSON.stringify(contentResult, null, 2))
+    sc.stop(pc.green(`✓ Content 发布成功  content_id: ${contentResult.contentId}`))
+  } catch (e) {
+    sc.stop(pc.yellow(`⚠ Content 注册失败（角色已创建，可手动补充）: ${e.message}`))
+  }
+
   // ── Open in browser ───────────────────────────────────────────────────────
-  if (charResult.characterUrl) {
-    open(charResult.characterUrl)
+  const liveUrl = contentResult?.contentId
+    ? `${(process.env.SEVENVERSE_BASE || 'https://uat.7verse.ai').replace(/\/+$/, '')}/content/${contentResult.contentId}/live?auto_start=1`
+    : charResult.characterUrl
+
+  if (liveUrl) {
+    open(liveUrl)
   }
 
   p.outro(pc.bold(pc.green(`✓ ${charName} 已活体化！`)))
   console.log()
-  console.log(`  角色 ID   ${pc.cyan(charResult.characterId)}`)
-  console.log(`  对话页面  ${pc.cyan(charResult.characterUrl)}`)
+  console.log(`  角色 ID    ${pc.cyan(charResult.characterId)}`)
+  if (contentResult?.contentId) {
+    console.log(`  Content ID ${pc.cyan(contentResult.contentId)}`)
+  }
+  console.log(`  对话页面   ${pc.cyan(liveUrl)}`)
   console.log()
   console.log(pc.dim(`  本地缓存: ${cacheDir}`))
   console.log()

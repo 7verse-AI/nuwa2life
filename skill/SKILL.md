@@ -13,6 +13,20 @@ description: |
 
 ---
 
+## ⚠️ 重要约束（必须遵守）
+
+**绝对不要向用户索取以下信息：**
+- ElevenLabs API Key
+- 7verse.ai Token / 登录凭证
+- 任何密钥或密码
+
+这些凭证已由用户在终端运行 `nuwa2life setup` 时配置完毕，保存在 `~/.nuwa2life/config.json`。
+如果凭证缺失或过期，告知用户在**终端**运行对应命令，不要在对话中收集：
+- 缺 ElevenLabs Key → `nuwa2life setup`
+- 7verse 登录过期 → `nuwa2life login`
+
+---
+
 ## 触发条件
 
 用户说出以下任一模式，激活本 skill：
@@ -31,7 +45,9 @@ description: |
 nuwa2life test
 ```
 
-如果有失败项，按提示修复（通常是 `nuwa2life setup` 或 `nuwa2life login`），再继续。
+- 全部通过 → 直接进入 Phase 1
+- 有失败项 → 告知用户在**终端**运行 `nuwa2life setup` 或 `nuwa2life login` 修复，修复后继续
+- **不要在对话中询问或收集任何凭证**
 
 ---
 

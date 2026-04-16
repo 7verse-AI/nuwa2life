@@ -166,13 +166,78 @@ export async function upsertCharacter({ distill, voiceId, portraitUrl, character
         )
         resolve({
           characterId: charId,
-          characterUrl: charId ? `${base}/character?id=${charId}` : '',
+          characterUrl: charId ? `${base}/content/${charId}/live?auto_start=1` : '',
           rawResponse: parsed,
         })
       })
     })
     req.on('error', reject)
     req.setTimeout(60_000, () => { req.destroy(); reject(new Error('注册超时 (60s)')) })
+    req.write(raw)
+    req.end()
+  })
+}
+
+// ── Content Registration ──────────────────────────────────────────────────────
+
+export async function registerContent({ characterId, name, description = '', portraitUrl = '', tags = [] }) {
+  const cookie = getAuthCookie()
+  const base   = getBase()
+
+  const body = {
+    type: 'character',
+    type_reference_id: characterId,
+    title: name,
+    description: description || name,
+    visibility: 'public',
+    status: 'published',
+    cover_image: {
+      image_url: portraitUrl,
+      aspect_ratio: '9:16',
+      width: 0,
+      height: 0,
+      prompt: '',
+      vendor: '',
+      model_version: '',
+    },
+    tags: tags.length ? tags : [],
+  }
+
+  const raw = JSON.stringify(body)
+
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: parseHost(base),
+      path: '/api/v1/contents/upsert',
+      method: 'POST',
+      headers: {
+        'Content-Type':   'application/json',
+        'Content-Length': Buffer.byteLength(raw),
+        'Cookie':         cookie,
+      },
+    }, (res) => {
+      let respRaw = ''
+      res.on('data', d => respRaw += d)
+      res.on('end', () => {
+        let parsed
+        try { parsed = JSON.parse(respRaw) } catch { parsed = {} }
+        if (res.statusCode === 401) {
+          reject(new Error('7verse.ai Token 已过期，请运行 nuwa2life login 重新登录'))
+          return
+        }
+        if (res.statusCode >= 400) {
+          reject(new Error(`Content 注册失败 ${res.statusCode}: ${respRaw}`))
+          return
+        }
+        const contentId = String(
+          parsed?.data?.id || parsed?.data?.content_id ||
+          parsed?.id || parsed?.content_id || ''
+        )
+        resolve({ contentId, rawResponse: parsed })
+      })
+    })
+    req.on('error', reject)
+    req.setTimeout(30_000, () => { req.destroy(); reject(new Error('Content 注册超时 (30s)')) })
     req.write(raw)
     req.end()
   })

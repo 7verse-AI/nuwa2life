@@ -92,11 +92,14 @@ export async function test(args) {
   }
   console.log()
 
+  console.log(pc.dim(`  配置文件: ~/.nuwa2life/config.json`))
+  console.log()
+
   const failed = results.filter(r => r[0] === FAIL)
   if (failed.length === 0) {
     p.outro(pc.green('✓ 所有测试通过'))
   } else {
-    p.outro(pc.red(`✗ ${failed.length} 项失败，请按上方提示修复`))
+    p.outro(pc.red(`✗ ${failed.length} 项失败，请在终端运行上方提示的命令修复`))
     process.exit(1)
   }
 }
