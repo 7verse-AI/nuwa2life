@@ -130,21 +130,64 @@ export function waitForCallback() {
 }
 
 /**
- * Full automatic OAuth flow.
+ * Full automatic OAuth flow (RFC 8252 §7.3 loopback redirect).
  * Opens browser → user clicks Google login → token arrives at /callback.
  * Returns token string on success, throws on timeout/error.
+ *
+ * REQUIRES backend to allowlist 127.0.0.1 in OAuth redirect URIs.
+ * Backend change: add 127.0.0.1 (any port) to the redirect host allowlist.
  */
 export async function oauthFlowAutomatic() {
   const base = SEVENVERSE_BASE()
   const callbackUrl = `http://127.0.0.1:${CALLBACK_PORT}/callback`
   const loginUrl = `${base}/api/v1/auth/google/web/login/start?redirect=${encodeURIComponent(callbackUrl)}`
 
-  const tokenPromise = waitForCallback()
+  // First check if backend supports 127.0.0.1 redirect
+  const supported = await checkRedirectSupported(base, callbackUrl)
+  if (!supported) {
+    throw new Error('redirect_not_allowed: backend has not allowlisted 127.0.0.1')
+  }
 
+  const tokenPromise = waitForCallback()
   const { default: open } = await import('open')
   await open(loginUrl)
+  return tokenPromise
+}
 
-  return tokenPromise  // resolves when /callback is hit
+/**
+ * Probe whether backend allows 127.0.0.1 as redirect host.
+ * Makes a GET to the login URL and checks if the response rejects the redirect.
+ * Backend returns 200 JSON with ok:false when redirect is not allowed.
+ * Backend returns 302 to Google when redirect is allowed.
+ */
+async function checkRedirectSupported(base, callbackUrl) {
+  const host = base.replace(/^https?:\/\//, '').split('/')[0]
+  return new Promise((resolve) => {
+    const req = https.request({
+      hostname: host,
+      path: `/api/v1/auth/google/web/login/start?redirect=${encodeURIComponent(callbackUrl)}`,
+      method: 'GET',
+    }, (res) => {
+      let body = ''
+      res.on('data', d => body += d)
+      res.on('end', () => {
+        // 302 = backend accepted the redirect, proceeding to Google OAuth
+        if (res.statusCode === 302) { resolve(true); return }
+        // JSON response with ok:false = backend rejected the redirect host
+        try {
+          const parsed = JSON.parse(body)
+          if (parsed.ok === false && body.includes('not allowed')) {
+            resolve(false); return
+          }
+        } catch { /* not JSON */ }
+        // Any other response — optimistically assume supported
+        resolve(true)
+      })
+    })
+    req.on('error', () => resolve(false))
+    req.setTimeout(5000, () => { req.destroy(); resolve(false) })
+    req.end()
+  })
 }
 
 /**
