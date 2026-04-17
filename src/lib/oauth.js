@@ -50,7 +50,7 @@ export async function verifyToken(token) {
   return new Promise((resolve) => {
     const req = https.request({
       hostname: host, path: '/api/v1/auth/verify', method: 'POST',
-      headers: { Cookie: `access_token_uat=${token}`, 'Content-Type': 'application/json' },
+      headers: { Cookie: `${host.includes('uat.') ? 'access_token_uat' : 'access_token'}=${token}`, 'Content-Type': 'application/json' },
     }, (res) => {
       let body = ''
       res.on('data', d => body += d)

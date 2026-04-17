@@ -16,7 +16,9 @@ function getBase() {
 function getAuthCookie() {
   const token = getConfigValue('sevenverseToken')
   if (!token) throw new Error('7verse.ai 未登录，请先运行 nuwa2life login')
-  return `access_token_uat=${token}`
+  const base = getBase()
+  const cookieName = base.includes('uat.') ? 'access_token_uat' : 'access_token'
+  return `${cookieName}=${token}`
 }
 
 function parseHost(base) {
