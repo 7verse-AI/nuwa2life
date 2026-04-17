@@ -35,45 +35,37 @@ export async function login() {
 
   let token = ''
 
-  // Try automatic mode (Mode A): local callback server captures token automatically
-  try {
-    const sp = p.spinner()
-    sp.start('浏览器已打开，等待登录完成...')
-    token = await oauthFlowAutomatic()
-    sp.stop(pc.green('✓ 登录成功'))
-  } catch (e) {
-    // Fall back to manual token paste (Mode B)
-    p.log.warn('自动登录不可用，请手动复制 Token')
-    p.log.info('  打开 DevTools (F12) → Application → Cookies → 复制 access_token_uat 的值')
+  // Mode B: open browser (no redirect), user pastes token after Google login
+  p.log.info('浏览器已打开 7verse.ai → 完成 Google 登录后：')
+  p.log.info('  打开 DevTools (F12) → Application → Cookies → 复制 access_token 的值')
 
-    let attempt = 0
-    while (!token) {
-      attempt++
-      const raw = await oauthFlowManual(async () => {
-        const val = await p.text({
-          message: '粘贴 access_token_uat 的值（输入 r 可重新打开浏览器）：',
-          placeholder: 'eyJ...',
-          validate(v) {
-            if (!v?.trim()) return '请粘贴 Token 值'
-            const clean = v.trim().replace(/^["']|["']$/g, '')
-            if (clean.toLowerCase() === 'r') return undefined
-            if (clean.length < 20) return 'Token 太短，请确认是否完整复制'
-          },
-        })
-        if (p.isCancel(val)) { p.cancel('已退出。'); process.exit(0) }
-        return val.trim().replace(/^["']|["']$/g, '')
+  let attempt = 0
+  while (!token) {
+    attempt++
+    const raw = await oauthFlowManual(async () => {
+      const val = await p.text({
+        message: '粘贴 access_token 的值（输入 r 可重新打开浏览器）：',
+        placeholder: 'eyJ...',
+        validate(v) {
+          if (!v?.trim()) return '请粘贴 Token 值'
+          const clean = v.trim().replace(/^["']|["']$/g, '')
+          if (clean.toLowerCase() === 'r') return undefined
+          if (clean.length < 20) return 'Token 太短，请确认是否完整复制'
+        },
       })
+      if (p.isCancel(val)) { p.cancel('已退出。'); process.exit(0) }
+      return val.trim().replace(/^["']|["']$/g, '')
+    })
 
-      if (raw?.toLowerCase() === 'r') { p.log.info('重新打开浏览器...'); continue }
-      if (raw) { token = raw; break }
+    if (raw?.toLowerCase() === 'r') { p.log.info('重新打开浏览器...'); continue }
+    if (raw) { token = raw; break }
 
-      if (attempt >= 3) {
-        const skip = await p.confirm({
-          message: '多次尝试失败，跳过？（运行 nuwa2life login 可随时重试）',
-          initialValue: true,
-        })
-        if (p.isCancel(skip) || skip) break
-      }
+    if (attempt >= 3) {
+      const skip = await p.confirm({
+        message: '多次尝试失败，跳过？（运行 nuwa2life login 可随时重试）',
+        initialValue: true,
+      })
+      if (p.isCancel(skip) || skip) break
     }
   }
 

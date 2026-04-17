@@ -166,18 +166,8 @@ async function doLoginFlow() {
 
   let token = ''
 
-  // Try automatic mode (Mode A): open browser, capture token via local callback server
-  try {
-    const s = p.spinner()
-    s.start('浏览器已打开，等待登录完成...')
-    token = await oauthFlowAutomatic()
-    s.stop(pc.green('✓ 登录成功'))
-  } catch (e) {
-    // Mode A failed (backend doesn't allowlist 127.0.0.1 yet, or timed out)
-    // Fall back to manual token paste (Mode B)
-    p.log.warn('自动登录不可用，请手动复制 Token')
-    token = await manualTokenFlow()
-  }
+  // Mode B: open browser (no redirect), user pastes token after Google login
+  token = await manualTokenFlow()
 
   if (token) {
     const s = p.spinner()
@@ -190,10 +180,10 @@ async function doLoginFlow() {
   }
 }
 
-// Manual token paste fallback (Mode B)
+// Manual token paste (Mode B)
 async function manualTokenFlow() {
   p.log.info('浏览器已打开 7verse.ai → 完成 Google 登录后：')
-  p.log.info('  打开 DevTools (F12) → Application → Cookies → 复制 access_token_uat 的值')
+  p.log.info('  打开 DevTools (F12) → Application → Cookies → 复制 access_token 的值')
 
   let token = ''
   let attempt = 0
@@ -203,7 +193,7 @@ async function manualTokenFlow() {
 
     const raw = await oauthFlowManual(async () => {
       const val = await p.text({
-        message: '粘贴 access_token_uat 的值（输入 r 可重新打开浏览器）：',
+        message: '粘贴 access_token 的值（输入 r 可重新打开浏览器）：',
         placeholder: 'eyJ...',
         validate(v) {
           if (!v?.trim()) return '请粘贴 Token 值'
