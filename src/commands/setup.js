@@ -14,7 +14,7 @@ import { mkdirSync, cpSync, existsSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { saveConfig, markSetupComplete, loadConfig } from '../lib/config.js'
 import { verifyApiKey } from '../lib/elevenlabs.js'
-import { isCachedTokenValid, oauthFlowAutomatic, saveToken, verifyToken } from '../lib/oauth.js'
+import { isCachedTokenValid, oauthFlowAutomatic, oauthFlowManual, saveToken, verifyToken } from '../lib/oauth.js'
 
 const SKILL_SRC = join(fileURLToPath(import.meta.url), '../../../skill')
 const SKILL_DST = join(homedir(), '.claude', 'skills', 'nuwa2life')
@@ -166,25 +166,14 @@ async function doLoginFlow() {
 
   let token = ''
 
-  // Mode A: automatic — local server captures token from redirect callback
-  // Requires backend to allowlist 127.0.0.1 in OAuth redirect URIs (RFC 8252 §7.3)
+  // Try automatic mode first; silently fall back to manual paste if not available
   try {
     const s = p.spinner()
     s.start('浏览器已打开，等待登录完成...')
     token = await oauthFlowAutomatic()
     s.stop(pc.green('✓ 登录成功'))
-  } catch (e) {
-    s.stop(pc.red('✗ 登录失败'))
-    if (e.message?.startsWith('redirect_not_allowed')) {
-      p.log.error('自动登录暂不可用：后端尚未开放 127.0.0.1 回调白名单')
-      p.log.info(`请联系后端团队将 127.0.0.1 加入 OAuth redirect URI 白名单（RFC 8252 §7.3）`)
-      p.log.warn(`登录步骤跳过，稍后运行 ${pc.cyan('nuwa2life login')} 补上`)
-    } else if (e.message === 'timeout') {
-      p.log.warn(`登录超时，稍后运行 ${pc.cyan('nuwa2life login')} 重试`)
-    } else {
-      p.log.error(e.message)
-    }
-    return
+  } catch {
+    token = await manualPasteFlow()
   }
 
   if (token) {
@@ -198,3 +187,41 @@ async function doLoginFlow() {
   }
 }
 
+async function manualPasteFlow() {
+  p.log.info('浏览器已打开 → 完成 Google 登录后：')
+  p.log.info('  打开 DevTools (F12) → Application → Cookies → 复制 access_token 的值')
+
+  let token = ''
+  let attempt = 0
+
+  while (!token) {
+    attempt++
+    const raw = await oauthFlowManual(async () => {
+      const val = await p.text({
+        message: '粘贴 Token（输入 r 可重新打开浏览器）：',
+        placeholder: 'eyJ...',
+        validate(v) {
+          if (!v?.trim()) return '请粘贴 Token 值'
+          const clean = v.trim().replace(/^["']|["']$/g, '')
+          if (clean.toLowerCase() === 'r') return undefined
+          if (clean.length < 20) return 'Token 太短，请确认是否完整复制'
+        },
+      })
+      if (p.isCancel(val)) { p.cancel('已退出。'); process.exit(0) }
+      return val.trim().replace(/^["']|["']$/g, '')
+    })
+
+    if (raw?.toLowerCase() === 'r') { p.log.info('重新打开浏览器...'); continue }
+    if (raw) { token = raw; break }
+
+    if (attempt >= 3) {
+      const skip = await p.confirm({
+        message: '多次尝试失败，跳过？（稍后运行 nuwa2life login 补上）',
+        initialValue: true,
+      })
+      if (p.isCancel(skip) || skip) break
+    }
+  }
+
+  return token
+}
