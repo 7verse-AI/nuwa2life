@@ -6,6 +6,23 @@
 
 ---
 
+## 试玩活体角色
+
+以下角色已在 7verse.ai 上线，点击直接对话：
+
+| 角色 | 试玩链接 |
+|------|---------|
+| Warren Buffett | [开始对话](https://uat.7verse.ai/content/2044995103935713280/live?auto_start=1) |
+| Steve Jobs | [开始对话](https://uat.7verse.ai/content/2045011016437223424/live?auto_start=1) |
+| Paul Graham | [开始对话](https://uat.7verse.ai/content/2045011040659329024/live?auto_start=1) |
+| Naval Ravikant | [开始对话](https://uat.7verse.ai/content/2045011080391970816/live?auto_start=1) |
+| Charlie Munger | [开始对话](https://uat.7verse.ai/content/2045011109374611456/live?auto_start=1) |
+| Nassim Taleb | [开始对话](https://uat.7verse.ai/content/2045011131424067584/live?auto_start=1) |
+
+> 需要 7verse.ai 账号（Google 登录即可）
+
+---
+
 ## 它能做什么
 
 你在 Claude Code 里说「我想跟费曼对话」，接下来它会自动帮你：

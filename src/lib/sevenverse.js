@@ -172,7 +172,7 @@ export async function upsertCharacter({ distill, voiceId, portraitUrl, character
       })
     })
     req.on('error', reject)
-    req.setTimeout(60_000, () => { req.destroy(); reject(new Error('注册超时 (60s)')) })
+    req.setTimeout(120_000, () => { req.destroy(); reject(new Error('注册超时 (120s)')) })
     req.write(raw)
     req.end()
   })
