@@ -144,6 +144,43 @@ export async function selectBestPremadeVoice(voiceDescription = '') {
   return { voiceId: best.voice_id, voiceName: best.name, vendor: 'elevenlabs', premade: true }
 }
 
+/**
+ * Pick a fallback premade voice without calling the ElevenLabs API.
+ * Used when the user has no API key or key is invalid but wants to proceed.
+ * Matches gender+age hints in voice_description (or name/persona fallback)
+ * against 4 hardcoded categories of ElevenLabs premade voice IDs.
+ */
+const FALLBACK_VOICES = {
+  young_male:    { voiceId: 'TxGEqnHWrfWFTfGW9XjX', voiceName: 'Josh',      label: '年轻男' },
+  young_female:  { voiceId: '21m00Tcm4TlvDq8ikWAM', voiceName: 'Rachel',    label: '年轻女' },
+  mature_male:   { voiceId: 'pNInz6obpgDQGcFmaJgB', voiceName: 'Adam',      label: '中老年男' },
+  mature_female: { voiceId: 'XB0fDUnXU5powFXDhCwa', voiceName: 'Charlotte', label: '中老年女' },
+}
+
+export function pickFallbackVoice(voiceDescription = '', extraHints = '') {
+  const blob = (voiceDescription + ' ' + extraHints).toLowerCase()
+
+  const isFemale =
+    /\b(female|woman|girl|she|her|lady)\b/.test(blob) ||
+    /[她女]/.test(blob)
+
+  const ageMatch = blob.match(/(\d{2,3})\s*岁/) || blob.match(/\bage(?:d)?\s+(\d{2,3})\b/)
+  const explicitAge = ageMatch ? parseInt(ageMatch[1], 10) : null
+  const isMature =
+    /\b(old|elder|senior|mature|aged|middle-aged|grey|gray|veteran)\b/.test(blob) ||
+    /(中年|老年|年长|资深)/.test(blob) ||
+    (explicitAge !== null && explicitAge >= 35)
+
+  const key =
+    isFemale && isMature ? 'mature_female' :
+    isFemale             ? 'young_female'  :
+    isMature             ? 'mature_male'   :
+                           'young_male'
+
+  const pick = FALLBACK_VOICES[key]
+  return { ...pick, vendor: 'elevenlabs', premade: true, fallback: true, category: key }
+}
+
 export async function verifyApiKey(apiKey) {
   return new Promise((resolve) => {
     const req = https.request(

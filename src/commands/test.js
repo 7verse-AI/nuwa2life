@@ -19,7 +19,7 @@ export async function test(args) {
   const isDryRun = args.includes('--dry-run')
 
   console.log()
-  p.intro(pc.bold('API 连通性测试') + (isDryRun ? pc.dim(' (dry-run)') : ''))
+  p.intro(pc.bold('API 体检') + (isDryRun ? pc.dim(' (dry-run · 只看配置)') : ''))
 
   const results = []
 
@@ -27,16 +27,16 @@ export async function test(args) {
   {
     const key = getConfigValue('elevenlabsApiKey')
     if (!key) {
-      results.push([FAIL, 'ElevenLabs API Key', '未配置 — 运行 nuwa2life setup'])
+      results.push([FAIL, 'ElevenLabs Key', '没设 — nuwa2life setup'])
     } else if (isDryRun) {
-      results.push([SKIP, 'ElevenLabs API Key', `已配置 (${maskKey(key)}) — dry-run 跳过验证`])
+      results.push([SKIP, 'ElevenLabs Key', `有 (${maskKey(key)}) — dry-run 不戳`])
     } else {
       const s = p.spinner()
-      s.start('验证 ElevenLabs API Key...')
+      s.start('戳 ElevenLabs...')
       const ok = await verifyApiKey(key)
       s.stop('')
-      results.push([ok ? CHECK : FAIL, 'ElevenLabs API Key',
-        ok ? `有效 (${maskKey(key)})` : '无效 — 请检查 Key 或运行 nuwa2life setup 重新配置'])
+      results.push([ok ? CHECK : FAIL, 'ElevenLabs Key',
+        ok ? `通 (${maskKey(key)})` : '不通 — 检查 Key / nuwa2life setup 重配'])
     }
   }
 
@@ -44,16 +44,16 @@ export async function test(args) {
   {
     const token = getCachedToken()
     if (!token) {
-      results.push([FAIL, '7verse.ai Token', '未登录 — 运行 nuwa2life login'])
+      results.push([FAIL, '7verse Token', '没登 — nuwa2life login'])
     } else if (isDryRun) {
-      results.push([SKIP, '7verse.ai Token', `已保存 — dry-run 跳过验证`])
+      results.push([SKIP, '7verse Token', `存着 — dry-run 不戳`])
     } else {
       const s = p.spinner()
-      s.start('验证 7verse.ai Token...')
+      s.start('戳 7verse Token...')
       const ok = await isCachedTokenValid()
       s.stop('')
-      results.push([ok ? CHECK : FAIL, '7verse.ai Token',
-        ok ? '有效' : '已过期 — 运行 nuwa2life login 重新登录'])
+      results.push([ok ? CHECK : FAIL, '7verse Token',
+        ok ? '通' : '过期了 — nuwa2life login 重登'])
     }
   }
 
@@ -62,7 +62,7 @@ export async function test(args) {
     const token = getCachedToken()
     if (token) {
       const s = p.spinner()
-      s.start('测试 7verse.ai 存储上传...')
+      s.start('试传一张 1x1 PNG 到 7verse 存储...')
       try {
         const tmpFile = join(tmpdir(), 'nuwa2life-test.png')
         // 1x1 white PNG
@@ -71,16 +71,16 @@ export async function test(args) {
         const { url } = await uploadFile(tmpFile, 'image/png')
         unlinkSync(tmpFile)
         s.stop('')
-        results.push([CHECK, '7verse.ai 存储上传', `✓ ${url.substring(0, 60)}...`])
+        results.push([CHECK, '7verse 存储', `✓ ${url.substring(0, 60)}...`])
       } catch (e) {
         s.stop('')
-        results.push([FAIL, '7verse.ai 存储上传', e.message])
+        results.push([FAIL, '7verse 存储', e.message])
       }
     } else {
-      results.push([SKIP, '7verse.ai 存储上传', '跳过（未登录）'])
+      results.push([SKIP, '7verse 存储', '跳过（没登）'])
     }
   } else {
-    results.push([SKIP, '7verse.ai 存储上传', 'dry-run 跳过'])
+    results.push([SKIP, '7verse 存储', 'dry-run 不传'])
   }
 
   // ── Print Results ──────────────────────────────────────────────────────────
@@ -92,14 +92,14 @@ export async function test(args) {
   }
   console.log()
 
-  console.log(pc.dim(`  配置文件: ~/.nuwa2life/config.json`))
+  console.log(pc.dim(`  配置: ~/.nuwa2life/config.json`))
   console.log()
 
   const failed = results.filter(r => r[0] === FAIL)
   if (failed.length === 0) {
-    p.outro(pc.green('✓ 所有测试通过'))
+    p.outro(pc.green('✓ 全绿，起飞'))
   } else {
-    p.outro(pc.red(`✗ ${failed.length} 项失败，请在终端运行上方提示的命令修复`))
+    p.outro(pc.red(`✗ ${failed.length} 项挂了，照上面的提示修`))
     process.exit(1)
   }
 }

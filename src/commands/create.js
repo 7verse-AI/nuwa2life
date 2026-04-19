@@ -10,9 +10,10 @@ import pc from 'picocolors'
 import { readFileSync, writeFileSync, existsSync, copyFileSync } from 'fs'
 import { join, extname, resolve as resolvePath } from 'path'
 import { getCacheDir, getConfigValue } from '../lib/config.js'
-import { validateAudioFile, cloneVoice, selectBestPremadeVoice } from '../lib/elevenlabs.js'
+import { validateAudioFile, cloneVoice, selectBestPremadeVoice, pickFallbackVoice, verifyApiKey } from '../lib/elevenlabs.js'
 import { uploadFile, upsertCharacter, registerContent } from '../lib/sevenverse.js'
 import { isCachedTokenValid } from '../lib/oauth.js'
+import { homedir } from 'os'
 import { default as open } from 'open'
 
 // Non-TTY: running inside Claude Code or a pipe — skip interactive prompts
@@ -22,20 +23,28 @@ export async function create(args) {
   const name = args.join(' ').trim()
 
   console.log()
-  p.intro(pc.bold(`创建角色：${name || '(交互模式)'}`))
+  p.intro(pc.bold(`搓一个：${name || '(交互模式)'}`))
 
   // ── Guard checks ──────────────────────────────────────────────────────────
+  // ElevenLabs 不是硬门槛——Key 缺/失效就走内置 fallback 音色
   const apiKey = getConfigValue('elevenlabsApiKey')
+  let useVoiceFallback = false
   if (!apiKey) {
-    p.log.error('ElevenLabs API Key 未配置')
-    p.outro(`运行 ${pc.cyan('nuwa2life setup')} 完成初始化`)
-    process.exit(1)
+    p.log.warn('ElevenLabs Key 没设，音色走内置 fallback（按人设里性别/年龄自动挑）')
+    useVoiceFallback = true
+  } else {
+    const keyAlive = await verifyApiKey(apiKey)
+    if (!keyAlive) {
+      p.log.warn('ElevenLabs Key 戳不通，音色走内置 fallback')
+      useVoiceFallback = true
+    }
   }
 
+  // 7verse 是硬门槛——没它啥也上不了线
   const tokenOk = await isCachedTokenValid()
   if (!tokenOk) {
-    p.log.error('7verse.ai 登录已过期')
-    p.outro(`运行 ${pc.cyan('nuwa2life login')} 刷新登录`)
+    p.log.error('7verse 登录挂了')
+    p.outro(`去终端跑 ${pc.cyan('nuwa2life login')} 刷一下`)
     process.exit(1)
   }
 
@@ -43,11 +52,11 @@ export async function create(args) {
   let charName = name
   if (!charName) {
     charName = await p.text({
-      message: '你想跟谁对话？',
+      message: '跟谁聊？',
       placeholder: 'Steve Jobs',
-      validate: v => (!v?.trim() ? '请输入人物名' : undefined),
+      validate: v => (!v?.trim() ? '总得给个名字吧' : undefined),
     })
-    if (p.isCancel(charName)) { p.cancel('已取消'); process.exit(0) }
+    if (p.isCancel(charName)) { p.cancel('撤了'); process.exit(0) }
     charName = charName.trim()
   }
 
@@ -61,23 +70,23 @@ export async function create(args) {
   if (existsSync(distillPath)) {
     try {
       distill = JSON.parse(readFileSync(distillPath, 'utf8'))
-      p.log.success(`加载已有人设: ${distillPath}`)
+      p.log.success(`读到现成人设: ${distillPath}`)
     } catch {
-      p.log.warn('distill.json 损坏，将重新生成')
+      p.log.warn('distill.json 坏了，重来一遍')
     }
   }
 
   if (!distill) {
-    p.log.warn(`未找到 ${distillPath}`)
-    p.log.info('提示：在 Claude Code 里说「我想跟 ' + charName + ' 对话」可自动生成人设')
-    p.log.info('或者手动创建 distill.json，格式参考：')
+    p.log.warn(`没找到 ${distillPath}`)
+    p.log.info('回 Claude Code 里说「我想跟 ' + charName + ' 聊聊」，自动生成人设')
+    p.log.info('或者手动造一个 distill.json，长这样：')
     console.log(pc.dim(JSON.stringify(DISTILL_SCHEMA_EXAMPLE, null, 2).split('\n').slice(0, 8).join('\n') + '\n  ...'))
-    p.outro('请先生成 distill.json 再运行此命令')
+    p.outro('先把 distill.json 弄好再来')
     process.exit(1)
   }
 
   // ── Audio / Voice ─────────────────────────────────────────────────────────
-  p.log.step(pc.bold(`音频  —  ${charName} 的声音样本`))
+  p.log.step(pc.bold(`音色  —  ${charName} 的声音`))
 
   const voiceJsonPath = join(cacheDir, 'voice.json')
   let voiceId
@@ -88,100 +97,93 @@ export async function create(args) {
     if (v.voiceId) {
       if (isTTY) {
         const reuse = await p.confirm({
-          message: `检测到已有音色 (${v.voiceName || v.voiceId})，直接使用？`,
+          message: `已经有音色了 (${v.voiceName || v.voiceId})，直接用？`,
           initialValue: true,
         })
         if (!p.isCancel(reuse) && reuse) voiceId = v.voiceId
       } else {
         voiceId = v.voiceId
-        p.log.success(`复用已有音色: ${v.voiceName || v.voiceId}`)
+        p.log.success(`复用音色: ${v.voiceName || v.voiceId}`)
       }
     }
   }
 
   if (!voiceId) {
-    // Find cached audio file
-    let cachedAudio = null
-    for (const ext of ['.mp3', '.wav', '.m4a', '.flac', '.ogg']) {
-      const candidate = join(cacheDir, `voice${ext}`)
-      if (existsSync(candidate)) { cachedAudio = candidate; break }
-    }
+    // Fast path B: no ElevenLabs Key → go straight to fallback premade
+    if (useVoiceFallback) {
+      const pick = pickFallbackVoice(distill.voice_description || '', distill.persona || '')
+      voiceId = pick.voiceId
+      writeFileSync(voiceJsonPath, JSON.stringify(pick, null, 2))
+      p.log.success(pc.green(`✓ 用内置音色: ${pick.voiceName}`) +
+        pc.dim(`  (${pick.label} · ${pick.voiceId})`))
+    } else {
+      // Find cached audio file
+      let cachedAudio = null
+      for (const ext of ['.mp3', '.wav', '.m4a', '.flac', '.ogg']) {
+        const candidate = join(cacheDir, `voice${ext}`)
+        if (existsSync(candidate)) { cachedAudio = candidate; break }
+      }
 
-    // In TTY mode: prompt for audio path if not cached
-    if (!cachedAudio && isTTY) {
-      p.log.info('把 mp3/wav/m4a 文件拖拽到终端，路径会自动填入')
-      p.log.info('建议 30 秒以上、无背景音乐、< 10MB')
-      const raw = await p.text({
-        message: '粘贴音频文件路径（或直接拖拽文件到终端）：',
-        validate(v) {
-          if (!v?.trim()) return '请提供音频文件路径'
-          const clean = cleanPath(v.trim())
-          const check = validateAudioFile(clean)
-          if (!check.ok) return check.error
-        },
-      })
-      if (p.isCancel(raw)) { p.cancel('已取消'); process.exit(0) }
-      const srcPath = cleanPath(raw.trim())
-      const audioExt = extname(srcPath).toLowerCase()
-      cachedAudio = join(cacheDir, `voice${audioExt}`)
-      copyFileSync(srcPath, cachedAudio)
-    }
-
-    if (cachedAudio) {
-      // Try voice cloning; fall back to premade on subscription error
-      const s = p.spinner()
-      s.start(`克隆 ${charName} 的音色...`)
-      try {
-        const result = await cloneVoice({
-          audioPath: cachedAudio,
-          voiceName: charName,
-          description: distill.voice_description || '',
+      // In TTY mode: prompt for audio path if not cached
+      if (!cachedAudio && isTTY) {
+        p.log.info('拖段 mp3/wav/m4a 进来，路径自动填入')
+        p.log.info('30 秒起步，无背景音乐，< 10MB')
+        const raw = await p.text({
+          message: '粘贴音频路径（或直接拖文件进来）：',
+          validate(v) {
+            if (!v?.trim()) return '来个文件路径'
+            const clean = cleanPath(v.trim())
+            const check = validateAudioFile(clean)
+            if (!check.ok) return check.error
+          },
         })
-        voiceId = result.voiceId
-        writeFileSync(voiceJsonPath, JSON.stringify(result, null, 2))
-        s.stop(pc.green(`✓ 音色克隆成功  voice_id: ${voiceId}`))
-      } catch (e) {
-        if (e.code === 'SUBSCRIPTION_REQUIRED') {
-          s.stop(pc.yellow(`⚠ ${e.message}`))
-          p.log.info('自动切换到最匹配的 premade 声音...')
-          const sp = p.spinner()
-          sp.start('从 ElevenLabs 挑选最适合的内置声音...')
-          try {
-            const result = await selectBestPremadeVoice(distill.voice_description || '')
+        if (p.isCancel(raw)) { p.cancel('撤了'); process.exit(0) }
+        const srcPath = cleanPath(raw.trim())
+        const audioExt = extname(srcPath).toLowerCase()
+        cachedAudio = join(cacheDir, `voice${audioExt}`)
+        copyFileSync(srcPath, cachedAudio)
+      }
+
+      if (cachedAudio) {
+        // Try voice cloning; fall back to premade on subscription error
+        const s = p.spinner()
+        s.start(`克隆 ${charName} 的声音...`)
+        try {
+          const result = await cloneVoice({
+            audioPath: cachedAudio,
+            voiceName: charName,
+            description: distill.voice_description || '',
+          })
+          voiceId = result.voiceId
+          writeFileSync(voiceJsonPath, JSON.stringify(result, null, 2))
+          s.stop(pc.green(`✓ 克隆好了  voice_id: ${voiceId}`))
+        } catch (e) {
+          if (e.code === 'SUBSCRIPTION_REQUIRED') {
+            s.stop(pc.yellow(`⚠ ${e.message}`))
+            p.log.info('换内置声音...')
+            const result = await pickOrSelectPremade(distill)
             voiceId = result.voiceId
             writeFileSync(voiceJsonPath, JSON.stringify(result, null, 2))
-            sp.stop(pc.green(`✓ 已选用内置声音: ${result.voiceName}`))
-          } catch (e2) {
-            sp.stop(pc.red('✗ 获取声音列表失败'))
-            p.log.error(e2.message)
+            p.log.success(pc.green(`✓ 用内置音色: ${result.voiceName}`))
+          } else {
+            s.stop(pc.red('✗ 克隆失败'))
+            p.log.error(e.message)
             process.exit(1)
           }
-        } else {
-          s.stop(pc.red('✗ 音色克隆失败'))
-          p.log.error(e.message)
-          process.exit(1)
         }
-      }
-    } else {
-      // Non-TTY, no cached audio — pick best premade voice automatically
-      p.log.warn('未找到音频样本，自动选用最匹配的内置声音')
-      const s = p.spinner()
-      s.start('从 ElevenLabs 挑选最适合的内置声音...')
-      try {
-        const result = await selectBestPremadeVoice(distill.voice_description || '')
+      } else {
+        // Non-TTY, no cached audio — pick best premade voice automatically
+        p.log.warn('没音频样本，从内置里挑一个')
+        const result = await pickOrSelectPremade(distill)
         voiceId = result.voiceId
         writeFileSync(voiceJsonPath, JSON.stringify(result, null, 2))
-        s.stop(pc.green(`✓ 已选用内置声音: ${result.voiceName}`))
-      } catch (e) {
-        s.stop(pc.red('✗ 获取声音列表失败'))
-        p.log.error(e.message)
-        process.exit(1)
+        p.log.success(pc.green(`✓ 用内置音色: ${result.voiceName}`))
       }
     }
   }
 
   // ── Portrait ──────────────────────────────────────────────────────────────
-  p.log.step(pc.bold('首帧图  —  上传到 7verse 存储'))
+  p.log.step(pc.bold('首帧图  —  传到 7verse'))
 
   const portraitCosPath = join(cacheDir, 'portrait_cos.json')
   let portraitUrl
@@ -191,13 +193,13 @@ export async function create(args) {
     if (pc2.url) {
       if (isTTY) {
         const reuse = await p.confirm({
-          message: `检测到已上传的首帧图，直接使用？`,
+          message: `已经传过图了，直接用？`,
           initialValue: true,
         })
         if (!p.isCancel(reuse) && reuse) portraitUrl = pc2.url
       } else {
         portraitUrl = pc2.url
-        p.log.success(`复用已上传首帧图`)
+        p.log.success(`复用已传的图`)
       }
     }
   }
@@ -208,26 +210,26 @@ export async function create(args) {
 
     if (!uploadSource) {
       const raw = await p.text({
-        message: '提供首帧图路径（Claude Code 自动搜图后会自动跳过此步）：',
+        message: '给张首帧图（Claude Code 搜过图就跳过这步）：',
         placeholder: '/path/to/portrait.jpg',
         validate(v) {
-          if (!v?.trim()) return '请提供图片路径'
-          if (!existsSync(cleanPath(v.trim()))) return '文件不存在'
+          if (!v?.trim()) return '来个图片路径'
+          if (!existsSync(cleanPath(v.trim()))) return '这路径是编的吧，文件不存在'
         },
       })
-      if (p.isCancel(raw)) { p.cancel('已取消'); process.exit(0) }
+      if (p.isCancel(raw)) { p.cancel('撤了'); process.exit(0) }
       uploadSource = cleanPath(raw.trim())
     }
 
     const s = p.spinner()
-    s.start('上传首帧图...')
+    s.start('传图...')
     try {
       const result = await uploadFile(uploadSource, 'image/jpeg')
       portraitUrl = result.url
       writeFileSync(portraitCosPath, JSON.stringify(result, null, 2))
-      s.stop(pc.green(`✓ 上传成功`))
+      s.stop(pc.green(`✓ 传好了`))
     } catch (e) {
-      s.stop(pc.red('✗ 上传失败'))
+      s.stop(pc.red('✗ 没传上'))
       p.log.error(e.message)
       process.exit(1)
     }
@@ -237,12 +239,12 @@ export async function create(args) {
   p.log.step(pc.bold('注册角色'))
 
   const s = p.spinner()
-  s.start(`在 7verse.ai 注册 ${charName}...`)
+  s.start(`把 ${charName} 塞进 7verse...`)
   let charResult
   try {
     charResult = await upsertCharacter({ distill, voiceId, portraitUrl })
     writeFileSync(join(cacheDir, 'upsert_response.json'), JSON.stringify(charResult, null, 2))
-    s.stop(pc.green(`✓ 角色注册成功  character_id: ${charResult.characterId}`))
+    s.stop(pc.green(`✓ 注册成功  character_id: ${charResult.characterId}`))
   } catch (e) {
     s.stop(pc.red('✗ 注册失败'))
     p.log.error(e.message)
@@ -250,10 +252,10 @@ export async function create(args) {
   }
 
   // ── Register Content ──────────────────────────────────────────────────────
-  p.log.step(pc.bold('发布内容'))
+  p.log.step(pc.bold('发布 Content（开播要这个）'))
 
   const sc = p.spinner()
-  sc.start('创建 Content 记录（开播所需）...')
+  sc.start('造 Content 记录...')
   let contentResult
   try {
     contentResult = await registerContent({
@@ -263,30 +265,86 @@ export async function create(args) {
       portraitUrl,
     })
     writeFileSync(join(cacheDir, 'content_response.json'), JSON.stringify(contentResult, null, 2))
-    sc.stop(pc.green(`✓ Content 发布成功  content_id: ${contentResult.contentId}`))
+    sc.stop(pc.green(`✓ Content 发布  content_id: ${contentResult.contentId}`))
   } catch (e) {
-    sc.stop(pc.yellow(`⚠ Content 注册失败（角色已创建，可手动补充）: ${e.message}`))
+    sc.stop(pc.yellow(`⚠ Content 注册没过（角色已建，可手动补）: ${e.message}`))
   }
 
-  // ── Open in browser ───────────────────────────────────────────────────────
+  // ── Live URL ──────────────────────────────────────────────────────────────
   const liveUrl = contentResult?.contentId
     ? `${(process.env.SEVENVERSE_BASE || 'https://7verse.ai').replace(/\/+$/, '')}/content/${contentResult.contentId}/live?auto_start=1`
     : charResult.characterUrl
 
+  // ── Big Loud Finish ───────────────────────────────────────────────────────
+  console.log()
+  console.log(pc.bold(pc.green(`  🎬  ${charName} 已上线！现在可以视频通话了`)))
+  console.log()
+  console.log(`     角色 ID    ${pc.cyan(charResult.characterId)}`)
+  if (contentResult?.contentId) {
+    console.log(`     Content ID ${pc.cyan(contentResult.contentId)}`)
+  }
+  console.log(`     对话页面   ${pc.cyan(liveUrl)}`)
+  console.log()
+
+  // Persist the live URL so the outer skill can pick it up if non-TTY
   if (liveUrl) {
-    open(liveUrl)
+    try {
+      writeFileSync(join(cacheDir, 'live_url.txt'), liveUrl + '\n')
+    } catch { /* non-fatal */ }
   }
 
-  p.outro(pc.bold(pc.green(`✓ ${charName} 已活体化！`)))
-  console.log()
-  console.log(`  角色 ID    ${pc.cyan(charResult.characterId)}`)
-  if (contentResult?.contentId) {
-    console.log(`  Content ID ${pc.cyan(contentResult.contentId)}`)
+  // ── Exit options ──────────────────────────────────────────────────────────
+  if (isTTY) {
+    const choice = await p.select({
+      message: '怎么聊？',
+      initialValue: 'web',
+      options: [
+        { value: 'web',      label: '[2] 网页视频通话', hint: '默认 · 能看脸能听声 · 按 Enter' },
+        { value: 'terminal', label: '[1] 终端文字对话', hint: '即时纯文本 · 用 distill.json 拼临时角色' },
+      ],
+    })
+
+    if (p.isCancel(choice) || choice === 'web') {
+      if (liveUrl) open(liveUrl)
+      p.outro(pc.bold(pc.green(`浏览器里见 → ${liveUrl}`)))
+    } else {
+      const perspectivePath = join(homedir(), '.claude', 'skills', `${toSlug(charName)}-perspective`)
+      const hasPerspective = existsSync(perspectivePath)
+      console.log()
+      if (hasPerspective) {
+        console.log(pc.bold(`  有 perspective skill，回 Claude Code 里：`))
+        console.log()
+        console.log(`    ${pc.cyan(`/skill ${toSlug(charName)}-perspective`)}`)
+        console.log()
+        console.log(pc.dim(`  或者直接对 ${charName} 说话，skill 会自己激活。`))
+      } else {
+        console.log(pc.bold(`  回 Claude Code 里对 ${charName} 说话就行。`))
+        console.log()
+        console.log(pc.dim(`  本次是 simple 蒸馏（没有 perspective skill）。nuwa2life skill 会读 distill.json 接管角色扮演。`))
+        console.log(pc.dim(`  想要更深的 perspective skill？跑 complete 模式：nuwa2life config --set-distill-mode complete`))
+      }
+      console.log()
+      p.outro(pc.dim(`  网页视频随时回来：${liveUrl}`))
+    }
+  } else {
+    // Non-TTY: skill invoked us via Bash. Auto-open + skill will show its own 1/2 prompt.
+    if (liveUrl) open(liveUrl)
+    p.outro(pc.bold(pc.green(`🎬 ${charName} 已上线，可以视频通话了！`)))
   }
-  console.log(`  对话页面   ${pc.cyan(liveUrl)}`)
+
+  console.log(pc.dim(`  缓存在 ${cacheDir}`))
   console.log()
-  console.log(pc.dim(`  本地缓存: ${cacheDir}`))
-  console.log()
+}
+
+// ── Premade voice helper ──────────────────────────────────────────────────────
+// Tries the smart selectBestPremadeVoice (needs valid API key).
+// Silently degrades to pickFallbackVoice (no API) on any failure.
+async function pickOrSelectPremade(distill) {
+  try {
+    return await selectBestPremadeVoice(distill.voice_description || '')
+  } catch {
+    return pickFallbackVoice(distill.voice_description || '', distill.persona || '')
+  }
 }
 
 // ── utils ─────────────────────────────────────────────────────────────────────

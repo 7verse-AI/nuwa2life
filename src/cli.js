@@ -23,7 +23,7 @@ export async function run() {
     case '--version': case '-v': console.log('0.1.0'); return
     case '--help': case '-h': printHelp(); return
     default:
-      console.error(pc.red(`未知命令: ${cmd}\n`))
+      console.error(pc.red(`不认识这命令: ${cmd}\n`))
       printHelp()
       process.exit(1)
   }
@@ -31,29 +31,30 @@ export async function run() {
 
 function printHelp() {
   console.log(`
-${pc.bold('nuwa2life')} — 让任何人物拥有声音和面孔
+${pc.bold('nuwa2life')} — 给任何人搓个 AI 分身
 
-${pc.dim('用法：')}
-  ${pc.cyan('npx nuwa2life')}                      首次运行，自动引导初始化
-  ${pc.cyan('nuwa2life setup')}                    重新初始化（只补缺失项）
+${pc.dim('上手：')}
+  ${pc.cyan('npx nuwa2life')}                               第一次跑，会带你配
+  ${pc.cyan('nuwa2life setup')}                             重头配（只补缺的）
 
-${pc.dim('配置管理：')}
-  ${pc.cyan('nuwa2life config')}                   查看当前配置状态
-  ${pc.cyan('nuwa2life config --clear-key')}       清除 ElevenLabs API Key
-  ${pc.cyan('nuwa2life config --clear-token')}     退出 7verse.ai 登录
-  ${pc.cyan('nuwa2life config --clear-all')}       清除全部配置
-  ${pc.cyan('nuwa2life login')}                    刷新 7verse.ai 登录 Token
+${pc.dim('配置：')}
+  ${pc.cyan('nuwa2life config')}                            查看配置
+  ${pc.cyan('nuwa2life config --set-distill-mode <mode>')}  改默认蒸馏深度 (simple/complete)
+  ${pc.cyan('nuwa2life config --clear-key')}                清 ElevenLabs Key
+  ${pc.cyan('nuwa2life config --clear-token')}              退 7verse 登录
+  ${pc.cyan('nuwa2life config --clear-all')}                全清（慎用）
+  ${pc.cyan('nuwa2life login')}                             刷 7verse 登录
 
-${pc.dim('创建角色：')}
-  ${pc.cyan('nuwa2life create "<人物名>"')}        直接从命令行创建角色（无需 Claude Code）
+${pc.dim('搓角色：')}
+  ${pc.cyan('nuwa2life create "<人物名>"')}                 命令行直接搓（不开 Claude Code）
 
-${pc.dim('调试：')}
-  ${pc.cyan('nuwa2life test')}                     测试 ElevenLabs + 7verse.ai 连通性
-  ${pc.cyan('nuwa2life test --dry-run')}           只检查配置，不发网络请求
+${pc.dim('体检：')}
+  ${pc.cyan('nuwa2life test')}                              戳所有 API
+  ${pc.cyan('nuwa2life test --dry-run')}                    只看配置，不发网络请求
 
-${pc.dim('在 Claude Code 里使用 Skill：')}
-  说「我想跟 Steve Jobs 对话」
-  说「把马斯克活体化」
-  说「nuwa2life 费曼」
+${pc.dim('Claude Code 里用 skill：')}
+  说「我想跟 Steve Jobs 聊聊」
+  说「搓个马斯克出来」
+  说「nuwa2life 张雪峰」
 `)
 }

@@ -49,6 +49,20 @@ export function markSetupComplete() {
   saveConfig({ setupComplete: true, setupAt: new Date().toISOString() })
 }
 
+const VALID_DISTILL_MODES = ['simple', 'complete']
+
+export function getDefaultDistillMode() {
+  const v = loadConfig().defaultDistillMode
+  return VALID_DISTILL_MODES.includes(v) ? v : 'simple'
+}
+
+export function setDefaultDistillMode(mode) {
+  if (!VALID_DISTILL_MODES.includes(mode)) {
+    throw new Error(`无效的蒸馏深度: ${mode}（只接受 simple / complete）`)
+  }
+  return saveConfig({ defaultDistillMode: mode })
+}
+
 export const CACHE_DIR = join(CONFIG_DIR, 'cache')
 
 export function getCacheDir(slug) {
