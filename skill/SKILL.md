@@ -389,83 +389,64 @@ curl -sI --max-time 3 "{url}" | grep -E "content-type|content-length"
 
 ## Phase 3：音频
 
-**自动爬取优先，找不到再请用户手动提供。**
+**优先级：自动下载 → 用户上传 → 内置音色。每步失败才走下一步，每步都告诉用户还有哪些选项。**
 
-**如果 Phase 0 设定了 `voiceFallback = true`（ElevenLabs Key 失效）**：跳过本阶段，`create` 命令自动按性别/年龄匹配内置音色，告诉用户：
+### 3.1 自动下载（首选）
 
-```
-ElevenLabs Key 未配置，音频步骤跳过，已为 {X} 匹配内置音色（按 persona 性别/年龄）。
-如需真实音色克隆，运行 nuwa2life setup 配置 Key 后重新执行此步骤。
-```
+并行跑 2 次 WebSearch 找演讲/访谈视频：
 
-### 3.1 自动搜索视频来源
+**中文人物**：`"{name}" 演讲 OR 直播 site:youtube.com` / `"{name}" 访谈 OR 对话 site:youtube.com`
+**英文人物**：`"{name}" speech OR interview site:youtube.com` / `"{name}" keynote OR talk site:youtube.com`
 
-并行跑 2 次 WebSearch 找包含 {name} 声音的视频：
-
-**中文人物**：
-- `"{name}" 演讲 OR 直播 site:youtube.com`
-- `"{name}" 访谈 OR 对话 site:youtube.com`
-
-**英文人物**：
-- `"{name}" speech OR interview site:youtube.com`
-- `"{name}" keynote OR talk site:youtube.com`
-
-从结果中提取 **YouTube 视频 URL**（优先选演讲/访谈/直播片段，排除二次解说/翻唱/纪录片旁白）。
-
-告诉用户正在做什么：
-
-```
-正在自动搜索 {X} 的音频来源...
-找到候选视频：{标题} — {url}
-```
-
-### 3.2 yt-dlp 自动下载（3 分钟片段）
-
-检查 `yt-dlp` 是否可用：
-
-```bash
-which yt-dlp
-```
-
-**可用时**，下载前 3 分钟音频：
+优先选演讲/访谈/直播片段，排除二次解说/翻唱/纪录片旁白。提取 YouTube URL 后用 `yt-dlp` 下载前 3 分钟：
 
 ```bash
 yt-dlp -x --audio-format mp3 --audio-quality 5 \
   --download-sections "*0:00-0:03:00" \
   -o "~/.nuwa2life/cache/{slug}/voice.%(ext)s" \
-  "{video_url}" \
-  --no-playlist --quiet --no-warnings
+  "{video_url}" --no-playlist --quiet --no-warnings
 ```
 
-下载完成验证文件大小（> 100KB = 成功），告诉用户：
+验证文件 > 100KB（失败则依次换候选，最多试 3 个）。
+
+成功时告诉用户：
 
 ```
-已自动获取 {X} 的声音样本：{来源视频标题}（前 3 分钟）
-文件大小：{size}，音质够用。
+已自动找到 {X} 的声音：{来源视频标题}（前 3 分钟）
+
+用这个继续，还是你有更好的片段想自己上传？
 ```
 
-**如果第一个 URL 失败**：依次尝试列表里其余候选 URL，最多试 3 个。
+### 3.2 用户上传（自动下载失败时）
 
-### 3.3 兜底：用户手动提供
-
-**仅当以下情况才请用户提供**：
-- `yt-dlp` 未安装
-- 所有候选 URL 下载均失败
-- 下载文件 < 100KB（可能是无声/错误文件）
+**`yt-dlp` 不可用、或 3 个候选都失败时**，展示选项：
 
 ```
-未能自动获取 {X} 的音频（原因：{具体原因}）。
+没找到可用的音频，有两个方式继续：
 
-请提供声音样本文件：
-  格式：mp3 / wav / m4a / flac / ogg
-  时长：30 秒 ~ 5 分钟（越长越准）
-  大小：< 10MB
-  建议：演讲/访谈片段，无背景音乐
+  [1] 自己上传一段 {X} 的声音
+        格式：mp3 / wav / m4a（30 秒以上，建议演讲/访谈片段）
+        拖入终端后回车
 
-将文件拖入终端窗口后回车：
+  [2] 用内置音色继续
+        系统会根据 {X} 的性别和年龄自动匹配一个声音，不需要任何文件
+
+怎么走？
 ```
 
-接收后处理 shell 转义路径（`\ ` → ` `）；验证格式和大小；成功复制到 `~/.nuwa2life/cache/{slug}/voice.{ext}`。
+接收上传文件后：处理 shell 转义路径（`\ ` → ` `），验证格式和大小（< 10MB），成功复制到 `~/.nuwa2life/cache/{slug}/voice.{ext}`。
+
+### 3.3 内置音色（最终选项）
+
+用户选 [2]，或 ElevenLabs 未配置时，直接走内置音色，告诉用户：
+
+```
+好，用内置音色继续。{create} 命令会根据 {X} 的性别和年龄自动选一个匹配的声音。
+
+想换成真实音色？之后在设置里配置完再重新跑这一步就行。
+```
+
+内部标记 `useBuiltinVoice = true`，`nuwa2life create` 据此跳过克隆步骤。
 
 ---
 
