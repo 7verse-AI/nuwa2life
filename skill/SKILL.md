@@ -17,10 +17,10 @@ description: |
 
 1. **绝对不要**在对话里向用户索取任何 API Key / Token / 密码。这些是 `nuwa2life setup` / `nuwa2life login` 在**终端**里配的，在 `~/.nuwa2life/config.json`。缺了就让用户去终端跑对应命令。
 2. **不要假定语言**。用户说中文你就说中文，用户说英文你就说英文，跟着走。这个 SKILL 的样例用中文，但**不强制**对用户也用中文回。
-3. **调性**：有趣、幽默、带点小毒舌。不要用"活体化""角色已注册""流程如下"这种机器味。例子：
-   - ❌ "请提供 {人物名} 的声音样本文件"
-   - ✅ "丢段 {人物名} 的声音进来，30 秒以上，别太干（我又不是来听 ASMR 的）"
-4. **小毒舌有边界**：吐槽的是流程、是现实约束，**不是用户、不是被蒸馏的人物**。
+3. **调性**：清晰、专业、像一个靠谱的工具助手。直接说步骤和状态，不绕弯子。例子：
+   - ❌ "丢段声音进来，别太干（我又不是来听 ASMR 的）"
+   - ✅ "请提供 {人物名} 的声音样本文件（mp3/wav，30 秒以上，建议演讲/访谈录音）"
+4. **保持友好但不过度**：可以简短地带一句感受（"找到了一张不错的图"），但不做角色扮演、不用梗、不吐槽。
 
 ---
 
@@ -61,7 +61,7 @@ nuwa2life test --dry-run
   huashu-nuwa      ✓ 已装  /  ✗ 没装（complete 模式会不可用）
 
 🔬 蒸馏深度  (默认: {defaultDistillMode})
-  [1] simple    ~1-2 min，轻调研（抓 3-5 段真实语料再生成）
+  [1] simple    ~3-5 min，5 路调研（句式结构 + 反模式 + 锚定生成）
   [2] complete  ~5-15 min，调 huashu-nuwa 跑完整 6-agent 蒸馏
                 顺手产出 ~/.claude/skills/{slug}-perspective/ 可复用
 
@@ -85,9 +85,9 @@ nuwa2life test --dry-run
 
 ---
 
-## Phase 1S：轻调研 Simple（~1-2 分钟）
+## Phase 1S：轻调研 Simple（~3-5 分钟）
 
-**目标**：不是单次 LLM 一把梭编造——先抓真实语料，再基于语料生成 JSON。没有真实语料，simple 不开生成。
+**目标**：不是单次 LLM 一把梭编造——先抓真实语料、提炼表达结构，再锚定生成 JSON。没有真实一手语料，simple 不开生成。
 
 ### 1S.1 人物语言分流
 
@@ -99,7 +99,7 @@ nuwa2life test --dry-run
 - B站原始视频（非搬运号）
 - 小宇宙 / 喜马拉雅（原始播客音频）
 - 微博（本人验证号）
-- 权威媒体：36氪、极客公园、晚点 LatePost、财新、第一财经、虎嗅、少数派、机器之心
+- 权威媒体：36氪、极客公园、晚点 LatePost、财新、第一财经、虎嗅、澎湃新闻、少数派、机器之心
 - 本人著作 / 个人公号文章**长文**（碎片 ≤300 字的不算）
 
 **黑名单**（**永远不用**）：
@@ -124,59 +124,93 @@ nuwa2life test --dry-run
 - Wikipedia **观点段**（事实段如生卒年、履历可用）
 - Content farm（Forbes contributor、buzzfeed 等）
 
-### 1S.2 三路并发搜
+### 1S.2 五路并发搜
 
-并行跑 3 次 `WebSearch`，搜词模板：
+并行跑 5 次 `WebSearch`，搜词模板：
 
 **中文人物**（`{name}` 替换成人物名）：
-- `"{name}" 演讲全文 OR transcript`
-- `"{name}" 直播切片 OR 短视频 经典语录 OR 口头禅`
-- `"{name}" 长访谈 OR 对话`
+- `"{name}" 演讲实录 OR 直播文字稿 OR transcript`
+- `"{name}" 经典语录 OR 口头禅 site:huxiu.com OR site:36kr.com OR site:thepaper.cn`
+- `"{name}" 长访谈 OR 深度报道 OR 专访`
+- `"{name}" 争议 OR 被追问 OR 怎么回应`
+- `"{name}" 连麦 OR 现场 OR 怎么说 site:weibo.com OR site:bilibili.com`
 
 **英文人物**：
 - `"{name}" interview transcript OR keynote full text`
-- `"{name}" podcast episode OR conversation long-form`
+- `"{name}" podcast episode OR conversation long-form site:lexfridman.com OR site:tim.blog`
 - `"{name}" essay OR op-ed OR blog post`
+- `"{name}" controversy OR pushback OR how he responded`
+- `"{name}" speaking style OR communication patterns OR rhetorical`
 
-对每次 WebSearch 结果过**白名单**；不在白名单的源直接丢弃。挑出 3-5 个最可能含长段真实原文的 URL，用 `WebFetch` 精读。
+对每次 WebSearch 结果严格过**白名单**；不在白名单的源丢弃。
 
-### 1S.3 凝练语料
+**搜索完成后立刻告诉用户找到了什么**（透明搜索过程）：
 
-把 3-5 段抓到的原文压成：
+```
+已搜索 5 组关键词，白名单内找到 {N} 个可用来源：
+  ✓ {来源标题} — {url 域名}
+  ✓ {来源标题} — {url 域名}
+  ...
+正在精读 {M} 个最有价值的页面...
+```
+
+从白名单来源中挑 4-6 个最可能含**长段真实原文**的 URL，用 `WebFetch` 精读。
+
+### 1S.3 提炼结构化语料
+
+把精读内容提炼成结构化 corpus，**重点不是"说了什么"，而是"怎么说"**。写入 `~/.nuwa2life/cache/{slug}/quick_corpus.md`：
 
 ```markdown
 # {name} · Quick Corpus
+来源：{N} 个白名单页面，{M} 条一手引语
 
-## 招牌段子 / 口头禅（5-10 条，每条来自真实语料）
-- "..."  [source: {url}]
-- ...
+## 一手直接引语（每条标出处 URL）
+- "原话..." [source: {url}]
+- ...（至少 8 条，越多越好）
 
-## 3-5 段完整原文摘录（每段 ≥200 字）
-...
+## 句式模板（按结构分类，这是最重要的部分）
 
-## 风格观察
-- 节奏：长句 / 短句 / 连珠炮 ...
+**[结构名称，如：假设+极端动作]**
+> "例句原话"
+规律：{这个结构的触发条件和效果}
+
+**[结构名称，如：对仗口诀]**
+> "例句原话"
+规律：...
+
+（提炼 4-6 种核心句式结构）
+
+## 开场 / 收尾模式
+开场：{他/她如何开始对话，具体套路}
+推进：{如何掌控节奏，如何处理对方犹豫}
+收尾：{典型结尾句，是否开放式}
+
+## 反模式（他/她绝对不会说的话）
+- 不会说："..." （因为：...）
+- 不会说："..." （因为：...）
+（至少 4 条，每条说明原因）
+
+## 高频词 & 节奏
 - 高频词：...
-- 典型句式：...
-- 语气：严肃 / 幽默 / 挑衅 / 温和 / ...
+- 节奏规律：短句/长句比例，停顿位置，音量变化规律
+- 口头禅/收尾词：...
 ```
 
-写入 `~/.nuwa2life/cache/{slug}/quick_corpus.md`。
-
-**如果搜完白名单只剩 <3 段可用原文**：诚实告诉用户"这人信息太少，simple 模式顶不住，建议切 complete"。让用户决定继续还是切换。
+**如果精读完白名单只剩 <4 条可用一手引语**：告诉用户"找到的一手资料太少，simple 模式准确度有限，建议切 complete 模式"，让用户决定继续还是切换。
 
 ### 1S.4 锚定生成 distill.json
 
-**基于 `quick_corpus.md` 作为强 context**，一次 LLM 调用生成 distill.json（格式见下）。硬约束写进生成 prompt：
+**必须基于 `quick_corpus.md` 生成，不允许脱离语料编造**。生成约束：
 
-- `opening_dialogs` 的三条，**每条必须直接化用或引用 corpus 里的招牌段子/高频句式**。不允许凭空编。
-- `voice_description` 必须写出 corpus 里观察到的**具体**节奏/口音/口头禅，不准写 "measured Chinese male voice" 这种白开水。
-- `persona` 至少 3 处挂钩真实事件或真实金句（可以是隐式引用）。
+- `opening_dialogs` 三条：**每条必须直接使用 corpus 里的句式模板**（能对号入座到具体结构名），不允许凭空编。其中至少一条使用该人物的真实开场套路（如果 corpus 有记录）。
+- `voice_description`：必须写出 corpus 里"节奏规律"和"口头禅"里的**具体内容**，不允许写"warm and engaging" 这种空话。
+- `persona`：至少引用 3 条一手直接引语（隐式引用也行，但要能对应），并点出 1 个内在矛盾（如有）。
+- `listening_pose`：参考 corpus 里"推进"模式描述的肢体习惯。
 
-**自检**（生成完立刻跑，不展示给用户）：
-> 「熟悉 {name} 的朋友读这 3 条 opening_dialogs + voice_description，能一眼认出是他/她吗？」
-> - 能 → 通过，展示给用户
-> - 不能 → 重写一次（最多 1 次）；再不通过就坦白"这轮没搓出灵魂，建议 complete 模式"
+**自检**（生成完立刻内部跑，不展示给用户）：
+> 熟悉 {name} 的人读这 3 条 `opening_dialogs` + `voice_description`，能一眼认出是他/她吗？
+> - 能认出 → 通过，继续
+> - 不能认出 → 对照 corpus 重写一次（最多 1 次）；仍不通过就告诉用户"这轮人设辨识度不够，建议用 complete 模式"
 
 ### 1S.5 distill.json schema
 
@@ -193,7 +227,7 @@ nuwa2life test --dry-run
   "listening_pose": {"dialog": "", "motion_prompt": "倾听姿态：细微点头/眼神/手势，传达专注"},
   "static_summary": "第三人称英文外貌描述（1-2句）",
   "portrait_search_query": "英文搜图关键词（15词内）：人名+标志性场合/服装+portrait+medium shot",
-  "voice_description": "英文声音特质（100词内），必须含真实观察（节奏/口音/口头禅）"
+  "voice_description": "英文声音特质（100词内），必须含真实观察到的节奏/口音/口头禅，不许用空洞形容词"
 }
 ```
 
@@ -216,7 +250,7 @@ Persona 前 200 字: ...
   ② {opening_2_preview}
   ③ {opening_3_preview}
 
-像不像？不像说「重写开场白」/「persona 太正经了」/「换更毒舌的风格」等，我就地改。
+认可人设？或说「重写开场白」/「persona 风格调整」等，就地修改。
 确认继续走图 + 音 + 上线？
 ```
 
@@ -289,22 +323,66 @@ perspective skill 也顺手生成了：~/.claude/skills/{slug}-perspective/
 
 ## Phase 2：首帧图
 
-用 `distill.json.portrait_search_query` 跑 WebSearch，抽 5 个候选图 URL（优先 JPG/PNG 直链、新闻/官方/Wikipedia 源）。分别 curl/fetch 下到 `~/.nuwa2life/cache/{slug}/candidates/`，Read 每张（多模态）按 `static_summary` 打分，选最匹配一张保存为 `~/.nuwa2life/cache/{slug}/portrait.jpg`。
+**搜图流程：多路搜索 → 脚本预筛 → VLM 精筛 → 确认。最后才让用户手动上传。**
 
-### 检查点
+### 2.1 多路搜图
+
+并行跑 **3 次 WebSearch**，搜词覆盖不同场景（用 `portrait_search_query` 为基础，再加变体）：
+
+- `{name} 演讲 OR 直播 人像 高清`（中文人物）/ `{name} keynote OR interview portrait`（英文人物）
+- `{name} site:thepaper.cn OR site:36kr.com OR site:huxiu.com`（中文）/ `{name} site:nytimes.com OR site:bloomberg.com OR site:wired.com`（英文）
+- `{portrait_search_query}`（原始关键词）
+
+从搜索结果页里抽取图片直链 URL（jpg/png/webp），目标收集 **10-15 个候选 URL**。
+
+### 2.2 脚本预筛（不用 VLM，节省 token）
+
+对每个候选 URL，用 curl HEAD 请求快速检查，**丢弃**不符合的：
+
+```bash
+# 批量检查：Content-Type 必须是 image/*，Content-Length > 30000 bytes
+curl -sI --max-time 3 "{url}" | grep -E "content-type|content-length"
+```
+
+保留 `Content-Type: image/` 且 `Content-Length > 30000`（排除 icon/缩略图）的 URL，下载到 `~/.nuwa2life/cache/{slug}/candidates/` 目录。
+
+### 2.3 VLM 精筛（Read 图片，多模态评分）
+
+对通过预筛的候选图，逐张 Read（多模态），**一次性评估以下所有维度**（不要多次调用 VLM）：
+
+| 维度 | 要求 |
+|------|------|
+| 主体匹配 | 与 `static_summary` 描述相符（发型/体型/气质） |
+| 画面清晰度 | 无明显模糊，脸部可见 |
+| 无字幕/水印 | 画面内无大面积文字覆盖、台标水印（小角标可接受） |
+| 景别 | 中景或近景（排除远景群照、背身照） |
+| 表情自然 | 排除夸张搞笑截图、闭眼、极端情绪截图 |
+
+综合打分（0-10），取 **≥7 分**的作为候选，选最高分一张保存为 `portrait.jpg`。
+
+**搜完告诉用户结果**：
 
 ```
-给 {X} 挑了张脸：{候选图的一句描述}
+已搜索 {N} 张候选图，通过预筛 {M} 张，VLM 评分后选出最佳：
 
-用这张？或者：
-  「换一张」 — 用第二候选
-  「我上传」 — 拖张图过来
+  {候选图的一句描述}（评分：{分}/10）
+
+确认使用这张？或选择：
+  「换一张」 — 使用次优候选（还有 {K} 张备选）
+  「我上传」 — 手动拖一张图进来
 ```
 
-如 WebSearch 捞不到合适的：
+### 2.4 兜底：用户上传
+
+**仅当所有候选图 VLM 评分均 <7 分**，才请用户上传：
 
 ```
-网上这人的图不太行（全是表情包/自拍/糊图）。拖张 {X} 的图过来吧，越正式越好：
+找到的图片质量不够理想（最高分 {分}/10，原因：{具体原因，如字幕遮挡/模糊/非本人}）。
+
+请拖一张 {X} 的图进来：
+  格式：jpg / png / webp
+  建议：演讲/访谈正面照，无大面积字幕，越清晰越好
+  尺寸：至少 400×400
 ```
 
 ---
@@ -312,14 +390,14 @@ perspective skill 也顺手生成了：~/.claude/skills/{slug}-perspective/
 ## Phase 3：音频
 
 ```
-丢段 {X} 的声音样本进来：
+请提供 {X} 的声音样本文件：
 
   格式：mp3 / wav / m4a / flac / ogg
   时长：30 秒 ~ 5 分钟（越长音色越准）
   大小：< 10MB
-  建议：演讲 / 访谈片段，干净无背景音乐（别来段他唱 K 的）
+  建议：演讲 / 访谈片段，干净无背景音乐
 
-拖到这个窗口，路径自动填入，然后回车：
+将文件拖入终端窗口，路径自动填入后回车确认：
 ```
 
 接收后处理 shell 转义路径（`\ ` → ` `）；验证文件、格式、大小；失败明确告诉哪里错让他重传；成功复制到 `~/.nuwa2life/cache/{slug}/voice.{ext}`。
@@ -382,7 +460,7 @@ nuwa2life create "{name}"
 | 音频 >10MB | 提示 `ffmpeg -i input.mp3 -t 180 -q:a 0 output.mp3` 截一段 |
 | 7verse 401 | 提示 `nuwa2life login` 后自动重试 |
 | 找不到合适首帧图 | 让用户手动上传 |
-| simple 模式白名单里 <3 段原文 | 诚实告诉，建议切 complete |
+| simple 模式白名单里 <4 条一手引语 | 诚实告诉准确度有限，建议切 complete |
 | complete 模式 huashu-nuwa 失败/超时 | 告诉用户 complete 出了问题，问是要降级 simple 还是放弃 |
 
 ---
