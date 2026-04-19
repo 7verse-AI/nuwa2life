@@ -65,5 +65,4 @@ npm install -g nuwa2life  # 全局安装
 ```
 ELEVENLABS_API_KEY       ElevenLabs API Key
 SEVENVERSE_UAT_ACCESS_TOKEN  7verse.ai access token
-SEVENVERSE_BASE          覆盖 7verse 域名（默认 https://uat.7verse.ai）
-```
+SEVENVERSE_BASE          覆盖 7verse 域名（默认 https://uat.7verse.ai）```
