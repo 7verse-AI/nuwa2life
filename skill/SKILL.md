@@ -389,25 +389,83 @@ curl -sI --max-time 3 "{url}" | grep -E "content-type|content-length"
 
 ## Phase 3：音频
 
-```
-请提供 {X} 的声音样本文件：
+**自动爬取优先，找不到再请用户手动提供。**
 
+**如果 Phase 0 设定了 `voiceFallback = true`（ElevenLabs Key 失效）**：跳过本阶段，`create` 命令自动按性别/年龄匹配内置音色，告诉用户：
+
+```
+ElevenLabs Key 未配置，音频步骤跳过，已为 {X} 匹配内置音色（按 persona 性别/年龄）。
+如需真实音色克隆，运行 nuwa2life setup 配置 Key 后重新执行此步骤。
+```
+
+### 3.1 自动搜索视频来源
+
+并行跑 2 次 WebSearch 找包含 {name} 声音的视频：
+
+**中文人物**：
+- `"{name}" 演讲 OR 直播 site:youtube.com`
+- `"{name}" 访谈 OR 对话 site:youtube.com`
+
+**英文人物**：
+- `"{name}" speech OR interview site:youtube.com`
+- `"{name}" keynote OR talk site:youtube.com`
+
+从结果中提取 **YouTube 视频 URL**（优先选演讲/访谈/直播片段，排除二次解说/翻唱/纪录片旁白）。
+
+告诉用户正在做什么：
+
+```
+正在自动搜索 {X} 的音频来源...
+找到候选视频：{标题} — {url}
+```
+
+### 3.2 yt-dlp 自动下载（3 分钟片段）
+
+检查 `yt-dlp` 是否可用：
+
+```bash
+which yt-dlp
+```
+
+**可用时**，下载前 3 分钟音频：
+
+```bash
+yt-dlp -x --audio-format mp3 --audio-quality 5 \
+  --download-sections "*0:00-0:03:00" \
+  -o "~/.nuwa2life/cache/{slug}/voice.%(ext)s" \
+  "{video_url}" \
+  --no-playlist --quiet --no-warnings
+```
+
+下载完成验证文件大小（> 100KB = 成功），告诉用户：
+
+```
+已自动获取 {X} 的声音样本：{来源视频标题}（前 3 分钟）
+文件大小：{size}，音质够用。
+```
+
+**如果第一个 URL 失败**：依次尝试列表里其余候选 URL，最多试 3 个。
+
+### 3.3 兜底：用户手动提供
+
+**仅当以下情况才请用户提供**：
+- `yt-dlp` 未安装
+- 所有候选 URL 下载均失败
+- 下载文件 < 100KB（可能是无声/错误文件）
+
+```
+未能自动获取 {X} 的音频（原因：{具体原因}）。
+
+请提供声音样本文件：
   格式：mp3 / wav / m4a / flac / ogg
-  时长：30 秒 ~ 5 分钟（越长音色越准）
+  时长：30 秒 ~ 5 分钟（越长越准）
   大小：< 10MB
-  建议：演讲 / 访谈片段，干净无背景音乐
+  建议：演讲/访谈片段，无背景音乐
 
-将文件拖入终端窗口，路径自动填入后回车确认：
+将文件拖入终端窗口后回车：
 ```
 
-接收后处理 shell 转义路径（`\ ` → ` `）；验证文件、格式、大小；失败明确告诉哪里错让他重传；成功复制到 `~/.nuwa2life/cache/{slug}/voice.{ext}`。
-
-**如果 Phase 0 设定了 `voiceFallback = true`（ElevenLabs Key 失效）**：跳过本阶段，`create` 命令会自动按人物性别/年龄从 4 类预设音色挑一个。告诉用户：
-
-```
-ElevenLabs Key 失效，音频克隆这步跳过，给 {X} 挑了个内置音色（按 persona 里的性别/年龄匹配）。
-音色想换真的？终端里跑 nuwa2life setup 补上 Key，然后「重搓 {X} 的音色」。
-```
+接收后处理 shell 转义路径（`\ ` → ` `）；验证格式和大小；成功复制到 `~/.nuwa2life/cache/{slug}/voice.{ext}`。
 
 ---
 
